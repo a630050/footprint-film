@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.log
+.DS_Store
+Thumbs.db
+
+# 本機測試輸出的影片
+*.mp4
+*.webm
+
+# 不公開的規格文件
+CONTEXT.md
+travel-video-web-spec*.md
