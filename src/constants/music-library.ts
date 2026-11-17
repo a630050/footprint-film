@@ -14,27 +14,28 @@ export interface BuiltinTrack {
 }
 
 /**
- * 內建曲庫：5 首皆為 OpenGameArt 上以 CC0（公眾領域）授權發布的曲目，可自由使用、不需標示作者。
- * 仍在「關於」對話框列出曲名與作者以示感謝。
+ * 內建曲庫：5 首皆為 CC0 或公眾領域（4 首來自 OpenGameArt，鋼琴曲來自 Wikimedia Commons），
+ * 可自由使用、不需標示作者，仍在「關於」對話框列出曲名與作者以示感謝。
+ * 所有曲目都已統一響度為 -14 LUFS（與 YouTube、Spotify 播放音量相近），切換曲目時音量一致。
  */
 export const BUILTIN_TRACKS: BuiltinTrack[] = [
   {
     id: 'acoustic',
-    style: '溫暖木吉他',
-    title: 'Sunset Plains',
-    author: 'Yoiyami',
-    durationSec: 330,
-    file: 'music/acoustic-sunset-plains.m4a',
-    sourceUrl: 'https://opengameart.org/content/sunset-plains'
+    style: '輕快木吉他',
+    title: 'Apple Cider',
+    author: 'Zane Little Music',
+    durationSec: 200,
+    file: 'music/acoustic-apple-cider.m4a',
+    sourceUrl: 'https://opengameart.org/content/apple-cider'
   },
   {
     id: 'piano',
-    style: '溫馨鋼琴',
-    title: 'Piano Emotional Solo 139',
-    author: 'Tozan',
-    durationSec: 205,
-    file: 'music/piano-emotional-solo-139.m4a',
-    sourceUrl: 'https://opengameart.org/content/piano-emotional-solo-139'
+    style: '歡樂鋼琴',
+    title: 'The Entertainer',
+    author: 'Scott Joplin 作曲・James Brigham 演奏',
+    durationSec: 306,
+    file: 'music/piano-the-entertainer.m4a',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:%22The_Entertainer%22_(1902),_by_Scott_Joplin.mp3'
   },
   {
     id: 'lofi',

@@ -81,7 +81,7 @@ export function MusicPicker() {
           <Music className="h-4 w-4 text-amber-400" />
           配樂
         </h3>
-        <p className="mt-0.5 text-xs text-slate-400">會依影片長度自動循環或裁切，開頭淡入、結尾淡出。內建曲目皆為 CC0 公眾領域授權。</p>
+        <p className="mt-0.5 text-xs text-slate-400">會依影片長度自動循環或裁切，開頭淡入、結尾淡出。內建曲目皆為 CC0 或公眾領域，音量已統一。</p>
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

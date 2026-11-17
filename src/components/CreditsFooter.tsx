@@ -54,9 +54,9 @@ const MAP_DATA_AND_SERVICES: CreditEntry[] = [
 /** 內建配樂（CC0 公眾領域，不需標示，仍列出以示感謝） */
 const MUSIC_CREDITS: CreditEntry[] = BUILTIN_TRACKS.map((t) => ({
   name: `${t.title}`,
-  license: 'CC0',
+  license: t.sourceUrl.includes('wikimedia') ? '公眾領域' : 'CC0',
   url: t.sourceUrl,
-  note: `${t.style} · ${t.author}（OpenGameArt）`
+  note: `${t.style} · ${t.author}（${t.sourceUrl.includes('wikimedia') ? 'Wikimedia Commons' : 'OpenGameArt'}）`
 }))
 
 function CreditList({ title, entries }: { title: string; entries: CreditEntry[] }) {
