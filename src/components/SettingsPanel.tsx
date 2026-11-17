@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useJourneyStore } from '../store/journey-store'
 
@@ -36,6 +37,41 @@ function useDeferredSlider(committedValue: number, onCommit: (value: number) => 
   return { draft, change, reset }
 }
 
+/** 開關列：標題、說明與勾選框 */
+function ToggleRow({
+  title,
+  description,
+  checked,
+  onChange
+}: {
+  title: string
+  description: ReactNode
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+      <div>
+        <div className="font-medium text-slate-200">{title}</div>
+        <div className="text-[11px] text-slate-400">{description}</div>
+      </div>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 shrink-0 rounded accent-amber-500"
+      />
+    </label>
+  )
+}
+
+/** 連拍門檻的顯示文字 */
+function formatBurstThreshold(sec: number): string {
+  if (sec <= 0) return '關閉'
+  if (sec < 60) return `${sec} 秒`
+  return sec % 60 === 0 ? `${sec / 60} 分鐘` : `${(sec / 60).toFixed(1)} 分鐘`
+}
+
 /**
  * 可收合的旅程設定區 (§4.3)
  * 包含：分站半徑、長途門檻、每格秒數（1–4 秒，預設 2）、自動拼圖開關、旅程標題
@@ -47,7 +83,7 @@ export function SettingsPanel() {
   const updateSettings = useJourneyStore((s) => s.updateSettings)
   const reclusterWithRadius = useJourneyStore((s) => s.reclusterWithRadius)
 
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
   const [pendingRadiusKm, setPendingRadiusKm] = useState<number | null>(null)
 
   const handleRadiusChange = (newRadius: number) => {
@@ -61,6 +97,9 @@ export function SettingsPanel() {
   const radiusSlider = useDeferredSlider(journey.settings.stationRadiusKm, handleRadiusChange)
   const thresholdSlider = useDeferredSlider(journey.settings.longDistanceThresholdKm, (value) =>
     updateSettings({ longDistanceThresholdKm: value })
+  )
+  const burstSlider = useDeferredSlider(journey.settings.burstThresholdSec, (value) =>
+    updateSettings({ burstThresholdSec: value })
   )
 
   const confirmRecluster = () => {
@@ -84,7 +123,7 @@ export function SettingsPanel() {
       >
         <div className="flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-amber-400" />
-          <span>旅程標題與進階設定（分站半徑、每格秒數、自動拼圖）</span>
+          <span>旅程標題與進階設定（分站、每頁秒數、拼接與運鏡）</span>
         </div>
         {isOpen ? (
           <ChevronUp className="h-4 w-4 text-slate-400" />
@@ -157,7 +196,7 @@ export function SettingsPanel() {
             {/* 每格秒數 */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-slate-300">
-                <label className="font-medium">每格秒數</label>
+                <label className="font-medium">每頁秒數</label>
                 <span className="font-mono text-amber-400">
                   {journey.settings.secondsPerCell} 秒
                 </span>
@@ -180,22 +219,50 @@ export function SettingsPanel() {
               </div>
             </div>
 
-            {/* 自動拼圖開關 */}
-            <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-              <div>
-                <div className="font-medium text-slate-200">自動拼圖</div>
-                <div className="text-[11px] text-slate-400">
-                  橫式影片連續直拍併為 2~3 張；直式影片連續橫拍併為 2 張
-                </div>
+            {/* 連拍門檻 */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-slate-300">
+                <label className="font-medium">連拍門檻</label>
+                <span className="font-mono text-amber-400">{formatBurstThreshold(burstSlider.draft)}</span>
               </div>
               <input
-                type="checkbox"
-                checked={journey.settings.autoCollage}
-                onChange={(e) => updateSettings({ autoCollage: e.target.checked })}
-                className="h-4 w-4 rounded accent-amber-500"
+                type="range"
+                min={0}
+                max={300}
+                step={10}
+                value={burstSlider.draft}
+                onChange={(e) => burstSlider.change(Number(e.target.value))}
+                className="w-full accent-amber-500"
               />
+              <p className="text-[11px] text-slate-400">
+                同一站內相隔不超過此時間的照片自動合成同一頁（預設 1 分鐘，拉到最左關閉）
+              </p>
             </div>
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <ToggleRow
+              title="自動拼圖"
+              description="橫式影片連續直拍併為 2~3 張；直式影片連續橫拍併為 2 張"
+              checked={journey.settings.autoCollage}
+              onChange={(checked) => updateSettings({ autoCollage: checked })}
+            />
+            <ToggleRow
+              title="拼接隨機"
+              description="沒有手動指定樣式的多張頁面，隨機搭配拼接樣式"
+              checked={journey.settings.randomLayout}
+              onChange={(checked) => updateSettings({ randomLayout: checked })}
+            />
+            <ToggleRow
+              title="鏡頭移動隨機"
+              description="沒有手動指定運鏡的頁面，隨機搭配漸進、漸遠與平移"
+              checked={journey.settings.randomMotion}
+              onChange={(checked) => updateSettings({ randomMotion: checked })}
+            />
+          </div>
+          <p className="text-[11px] text-slate-500">
+            自動拼圖與連拍門檻只影響還沒手動分頁的站點；在站點中手動指定的樣式與運鏡不受隨機影響。
+          </p>
         </div>
       )}
 
@@ -205,7 +272,7 @@ export function SettingsPanel() {
           <div className="max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-4">
             <h4 className="text-base font-bold text-white">確認重新分站？</h4>
             <p className="text-sm leading-relaxed text-slate-300">
-              重新分站會清除站點名稱、站點備註與合併／拆分設定；照片備註與入選勾選會保留。
+              重新分站會清除站點名稱、站點備註、合併／拆分與分頁設定；照片備註與入選勾選會保留。
             </p>
             <div className="flex justify-end gap-3">
               <button

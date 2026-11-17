@@ -2,6 +2,7 @@ import { Loader2, Maximize, Minimize, Pause, Play, RotateCcw } from 'lucide-reac
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getVideoDimensions } from '../constants/video-config'
 import { useJourneySummary } from '../hooks/use-journey-summary'
+import { usePreviewMusic } from '../hooks/use-preview-music'
 import { FramePainter } from '../services/frame-painter'
 import { DeterministicMapRenderer } from '../services/map-renderer'
 import { useJourneyStore } from '../store/journey-store'
@@ -68,6 +69,8 @@ export function PreviewPlayer() {
 
   journeyRef.current = journey
   timelineRef.current = summary.timeline
+
+  usePreviewMusic(journey, isPlaying, timeRef, totalDurationMs)
 
   const requestRender = useCallback(() => {
     if (isRenderingRef.current) {

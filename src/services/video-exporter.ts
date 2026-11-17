@@ -1,7 +1,9 @@
 import {
+  AudioBufferSource,
   BufferTarget,
   EncodedPacket,
   EncodedVideoPacketSource,
+  getFirstEncodableAudioCodec,
   Mp4OutputFormat,
   Output
 } from 'mediabunny'
@@ -12,6 +14,10 @@ import type { Journey, Segment, VideoOrientation, VideoResolution } from '../typ
 import { FramePainter, getActiveStations } from './frame-painter'
 import { isWebCodecsSupported } from './browser-support'
 import { DeterministicMapRenderer } from './map-renderer'
+import { decodeMusic, getMusicSource, MUSIC_SAMPLE_RATE, renderMusicForVideo } from './music'
+
+/** 配樂音軌位元率 */
+const AUDIO_BITRATE = 128_000
 
 /** H.264 候選設定檔（由高相容 Baseline / Main 到 High 依序探測） */
 const H264_CODEC_CANDIDATES = [
@@ -174,6 +180,8 @@ export async function exportJourneyVideoMp4(
   downgradedTo720p: boolean
   /** 等待逾時、地圖圖磚未完整載入就輸出的幀數 */
   incompleteMapFrames: number
+  /** 有選配樂但瀏覽器無法編碼音訊時為 true（影片會沒有聲音） */
+  audioSkipped: boolean
 }> {
   if (!isWebCodecsSupported()) {
     throw new Error('此瀏覽器不支援 WebCodecs，請改用 Chrome 或 Safari。')
@@ -214,7 +222,39 @@ export async function exportJourneyVideoMp4(
     frameRate: VIDEO_FPS
   })
 
+  // 配樂：依影片長度循環／裁切並加上淡入淡出，優先用相容性最好的 AAC，不支援時改用 Opus
+  let audioSource: AudioBufferSource | null = null
+  let musicBuffer: AudioBuffer | null = null
+  let audioSkipped = false
+  const musicSource = getMusicSource(journey)
+  if (musicSource) {
+    const decoded = await decodeMusic(await musicSource.load())
+    musicBuffer = await renderMusicForVideo(decoded, totalDurationMs / 1000, journey.settings.music.volume)
+    const audioCodec = await getFirstEncodableAudioCodec(['aac', 'opus'], {
+      numberOfChannels: 2,
+      sampleRate: MUSIC_SAMPLE_RATE,
+      bitrate: AUDIO_BITRATE
+    })
+    if (audioCodec) {
+      audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: AUDIO_BITRATE })
+      output.addAudioTrack(audioSource)
+    } else {
+      audioSkipped = true
+      musicBuffer = null
+    }
+  }
+
   await output.start()
+
+  // 音軌在背景寫入（不等待，避免與影像軌互相等待交錯寫入）
+  const audioDone: Promise<void> =
+    audioSource && musicBuffer
+      ? audioSource.add(musicBuffer).then(() => audioSource!.close())
+      : Promise.resolve()
+  let audioError: Error | null = null
+  audioDone.catch((err) => {
+    audioError = err instanceof Error ? err : new Error(String(err))
+  })
 
   let packetWriteChain = Promise.resolve()
   let encoderError: Error | null = null
@@ -347,6 +387,8 @@ export async function exportJourneyVideoMp4(
     }
 
     packetSource.close()
+    await audioDone.catch(() => undefined)
+    if (audioError) throw audioError
     await output.finalize()
 
     const arrayBuffer = bufferTarget.buffer
@@ -366,7 +408,8 @@ export async function exportJourneyVideoMp4(
       mp4Blob: new Blob([arrayBuffer], { type: 'video/mp4' }),
       resolutionUsed: resolution,
       downgradedTo720p,
-      incompleteMapFrames: mapRenderer.incompleteFrameCount
+      incompleteMapFrames: mapRenderer.incompleteFrameCount,
+      audioSkipped
     }
   } finally {
     if (videoEncoder.state !== 'closed') {

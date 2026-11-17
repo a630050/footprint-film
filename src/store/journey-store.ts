@@ -15,13 +15,25 @@ import {
 } from '../services/draft-storage'
 import { hasCachedReverseGeocode, reverseGeocodeStationCenter } from '../services/geocoding'
 import { fetchGroundRouteWithFallback } from '../services/routing'
+import { resolveStationPages } from '../domain/pages'
 import type {
   Coordinates,
   Journey,
   JourneySettings,
   Photo,
-  Station
+  Station,
+  StationPage
 } from '../types/journey'
+
+/** 刪除照片時留下的復原資訊 */
+export interface DeletedPhotoUndo {
+  photo: Photo
+  stationId?: string
+  indexInStation: number
+  stationPagesBefore?: StationPage[]
+  unassignedIndex: number
+  wasCover: boolean
+}
 
 export type AppStep = 1 | 2 | 3
 
@@ -44,6 +56,8 @@ interface JourneyStoreState {
   pendingDraft: Journey | null
   /** 是否已完成初始草稿檢查 */
   draftChecked: boolean
+  /** 最近一次刪除的照片（提供「復原」） */
+  lastDeletedPhoto: DeletedPhotoUndo | null
 
   // 步驟與草稿管理
   setCurrentStep: (step: AppStep) => void
@@ -62,6 +76,12 @@ interface JourneyStoreState {
   deleteStation: (stationId: string) => void
   togglePhotoIncluded: (photoId: string) => void
   updatePhotoNote: (photoId: string, note: string) => void
+  /** 從旅程中刪除照片（可在提示列按「復原」） */
+  deletePhoto: (photoId: string) => void
+  undoDeletePhoto: () => void
+  dismissDeletedPhoto: () => void
+  /** 儲存站點的手動分頁（拖曳排序、分隔線、樣式與運鏡設定） */
+  updateStationPages: (stationId: string, pages: StationPage[]) => void
   setCoverPhoto: (photoId: string) => void
   reorderPhotoInStation: (stationId: string, fromIndex: number, toIndex: number) => void
   movePhotoToStation: (photoId: string, targetStationId: string) => void
@@ -77,6 +97,8 @@ interface JourneyStoreState {
   updateSettings: (partial: Partial<JourneySettings>) => void
   /** 設定（或清除）移動標記用的圓形大頭照；設定時一併把移動標記切換為大頭照 */
   setTravelerAvatar: (avatar: Blob | undefined) => void
+  /** 設定（或移除）使用者上傳的配樂；設定時一併切換為「自訂配樂」 */
+  setCustomMusic: (music: { blob: Blob; fileName: string } | undefined) => void
   reclusterWithRadius: (newRadiusKm: number) => void
 
   // 非同步背景任務：查詢站點地名與陸路路線
@@ -146,6 +168,7 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
   geocodingProgress: { isQuerying: false, completed: 0, total: 0 },
   pendingDraft: null,
   draftChecked: false,
+  lastDeletedPhoto: null,
 
   setCurrentStep: (step) => set({ currentStep: step }),
 
@@ -264,9 +287,18 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
       .filter((p): p is Photo => Boolean(p))
 
     const newCenter = computeStationCenter(combinedPhotos, first.center)
+    // 任一站手動分頁過，就把兩站目前的分頁接起來，保留使用者的設定
+    const mergedPages =
+      first.pages || second.pages
+        ? [
+            ...resolveStationPages(first, journey.photos, journey.settings),
+            ...resolveStationPages(second, journey.photos, journey.settings)
+          ]
+        : undefined
     const mergedStation: Station = {
       ...first,
       photoIds: combinedPhotoIds,
+      pages: mergedPages,
       center: newCenter,
       note: first.note || second.note
     }
@@ -317,6 +349,7 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
     const stationB: Station = {
       id: createStationId(),
       photoIds: secondIds,
+      pages: targetStation.pages,
       center: computeStationCenter(secondPhotos, targetStation.center),
       autoName: `站點 ${stIdx + 2}`
     }
@@ -394,6 +427,101 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
       [photoId]: { ...target, note }
     }
     const nextJourney: Journey = { ...journey, photos }
+    set({ journey: nextJourney })
+    void saveJourneyDraft(nextJourney)
+  },
+
+  deletePhoto: (photoId) => {
+    const { journey } = get()
+    const photo = journey.photos[photoId]
+    if (!photo) return
+
+    const station = journey.stations.find((st) => st.photoIds.includes(photoId))
+    const undo: DeletedPhotoUndo = {
+      photo,
+      stationId: station?.id,
+      indexInStation: station ? station.photoIds.indexOf(photoId) : -1,
+      stationPagesBefore: station?.pages,
+      unassignedIndex: journey.unassignedPhotoIds.indexOf(photoId),
+      wasCover: journey.coverPhotoId === photoId
+    }
+
+    const photos = { ...journey.photos }
+    delete photos[photoId]
+    const stations = journey.stations
+      .map((st) => {
+        if (!st.photoIds.includes(photoId)) return st
+        const remaining = st.photoIds.filter((id) => id !== photoId)
+        const stPhotos = remaining.map((id) => photos[id]).filter(Boolean)
+        return { ...st, photoIds: remaining, center: computeStationCenter(stPhotos, st.center) }
+      })
+      .filter((st) => st.photoIds.length > 0)
+
+    const nextJourney: Journey = {
+      ...journey,
+      photos,
+      stations,
+      unassignedPhotoIds: journey.unassignedPhotoIds.filter((id) => id !== photoId),
+      coverPhotoId: pickDefaultCoverPhotoId(photos, stations, undo.wasCover ? undefined : journey.coverPhotoId),
+      hasManualStationEdits: true
+    }
+    set({ journey: nextJourney, lastDeletedPhoto: undo })
+    void saveJourneyDraft(nextJourney)
+    void get().refreshStationNamesAndRoutes()
+  },
+
+  undoDeletePhoto: () => {
+    const { journey, lastDeletedPhoto: undo } = get()
+    if (!undo) return
+    const photos = { ...journey.photos, [undo.photo.id]: undo.photo }
+
+    let stations = journey.stations
+    const station = undo.stationId ? stations.find((st) => st.id === undo.stationId) : undefined
+    if (station) {
+      const ids = [...station.photoIds]
+      ids.splice(Math.min(Math.max(0, undo.indexInStation), ids.length), 0, undo.photo.id)
+      const stPhotos = ids.map((id) => photos[id]).filter(Boolean)
+      stations = stations.map((st) =>
+        st.id === station.id
+          ? {
+              ...st,
+              photoIds: ids,
+              pages: undo.stationPagesBefore ?? st.pages,
+              center: computeStationCenter(stPhotos, st.center)
+            }
+          : st
+      )
+    }
+
+    const unassignedPhotoIds = [...journey.unassignedPhotoIds]
+    if (!station) {
+      // 原本是未歸類照片，或原站點已不存在：放回未歸類區
+      const at = undo.unassignedIndex >= 0 ? undo.unassignedIndex : unassignedPhotoIds.length
+      unassignedPhotoIds.splice(Math.min(at, unassignedPhotoIds.length), 0, undo.photo.id)
+    }
+
+    const nextJourney: Journey = {
+      ...journey,
+      photos,
+      stations,
+      unassignedPhotoIds,
+      coverPhotoId: undo.wasCover ? undo.photo.id : journey.coverPhotoId
+    }
+    set({ journey: nextJourney, lastDeletedPhoto: null })
+    void saveJourneyDraft(nextJourney)
+    void get().refreshStationNamesAndRoutes()
+  },
+
+  dismissDeletedPhoto: () => set({ lastDeletedPhoto: null }),
+
+  updateStationPages: (stationId, pages) => {
+    const { journey } = get()
+    const stations = journey.stations.map((st) =>
+      st.id === stationId
+        ? { ...st, pages, photoIds: pages.flatMap((p) => p.photoIds) }
+        : st
+    )
+    const nextJourney: Journey = { ...journey, stations, hasManualStationEdits: true }
     set({ journey: nextJourney })
     void saveJourneyDraft(nextJourney)
   },
@@ -607,6 +735,21 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
       settings: {
         ...journey.settings,
         travelerMarker: avatar ? 'avatar' : journey.settings.travelerMarker === 'avatar' ? 'dot' : journey.settings.travelerMarker
+      }
+    }
+    set({ journey: nextJourney })
+    void saveJourneyDraft(nextJourney)
+  },
+
+  setCustomMusic: (music) => {
+    const { journey } = get()
+    const current = journey.settings.music
+    const nextJourney: Journey = {
+      ...journey,
+      customMusic: music,
+      settings: {
+        ...journey.settings,
+        music: { ...current, source: music ? 'custom' : current.source === 'custom' ? 'none' : current.source }
       }
     }
     set({ journey: nextJourney })

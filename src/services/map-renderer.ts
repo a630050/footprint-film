@@ -57,6 +57,23 @@ function waitForMapEvent(map: MapLibreMap, timeoutMs: number): Promise<void> {
   })
 }
 
+/** 等到分頁回到前景 */
+function waitForVisible(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (document.visibilityState !== 'hidden') {
+      resolve()
+      return
+    }
+    const onChange = () => {
+      if (document.visibilityState !== 'hidden') {
+        document.removeEventListener('visibilitychange', onChange)
+        resolve()
+      }
+    }
+    document.addEventListener('visibilitychange', onChange)
+  })
+}
+
 /**
  * 封裝 MapLibre 實例，提供確定性運鏡（jumpTo + 同步 redraw）、螢幕座標投影與圖磚就緒等待
  * NOTE: 路線不放在 MapLibre 的 GeoJSON 圖層，而由 FramePainter 投影後以 Canvas 2D 繪製——
@@ -112,11 +129,21 @@ export class DeterministicMapRenderer {
     // NOTE: 不等 'load' 事件——它由 MapLibre 的 requestAnimationFrame 觸發，分頁在背景時 rAF 會暫停，
     // 過去的做法是逾時後「當作沒載入」繼續跑，結果輸出整支沒有底圖的影片。
     // 改為主動同步 redraw() 推進載入流程，並在真的載入失敗時明確拋出錯誤
-    const start = performance.now()
-    while (!map.isStyleLoaded() && performance.now() - start < MAP_STYLE_LOAD_TIMEOUT_MS) {
+    // NOTE: MapLibre 套用樣式前會等一次 requestAnimationFrame；分頁在背景時 rAF 完全暫停，
+    // 因此分頁隱藏的時間不計入逾時，回到前景後再繼續等待
+    let waitedMs = 0
+    let last = performance.now()
+    while (!map.isStyleLoaded() && waitedMs < MAP_STYLE_LOAD_TIMEOUT_MS) {
+      if (document.visibilityState === 'hidden') {
+        await waitForVisible()
+        last = performance.now()
+      }
       await waitForMapEvent(map, 50)
       if (this.map !== map) return // 等待期間已被 destroy()
       map.redraw()
+      const now = performance.now()
+      waitedMs += now - last
+      last = now
     }
 
     if (!map.isStyleLoaded()) {

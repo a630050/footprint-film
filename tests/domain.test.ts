@@ -12,7 +12,6 @@ import {
   computeStationCenter
 } from '../src/domain/station-clustering'
 import {
-  buildStationDisplayCells,
   resolveDisplayCellOverlayText
 } from '../src/domain/display-cells'
 import {
@@ -27,6 +26,7 @@ import {
   evaluateMoveSegmentAt
 } from '../src/domain/camera-path'
 import { generateJourneyTitle } from '../src/domain/journey-title'
+import { buildAutoPages } from '../src/domain/pages'
 import { DEFAULT_JOURNEY_SETTINGS, MAX_CAMERA_FIT_ZOOM, MAX_MOVE_FIT_ZOOM } from '../src/constants/video-config'
 import type { Journey, Photo, Station } from '../src/types/journey'
 
@@ -168,11 +168,7 @@ describe('display-cells: 展示格與拼圖分組規則 (§3.2)', () => {
       makeTestPhoto({ id: 'v6', width: 1080, height: 1920 })
     ]
 
-    const cells = buildStationDisplayCells(photos, {
-      orientation: 'landscape',
-      secondsPerCell: 2,
-      autoCollage: true
-    })
+    const cells = buildAutoPages(photos, { ...DEFAULT_JOURNEY_SETTINGS, orientation: 'landscape', burstThresholdSec: 0 })
 
     expect(cells.map((c) => c.photoIds)).toEqual([
       ['v1', 'v2', 'v3'],
@@ -201,11 +197,7 @@ describe('display-cells: 展示格與拼圖分組規則 (§3.2)', () => {
       makeTestPhoto({ id: 'v1', width: 1080, height: 1920 })
     ]
 
-    const cells = buildStationDisplayCells(photos, {
-      orientation: 'portrait',
-      secondsPerCell: 2,
-      autoCollage: true
-    })
+    const cells = buildAutoPages(photos, { ...DEFAULT_JOURNEY_SETTINGS, orientation: 'portrait', burstThresholdSec: 0 })
 
     expect(cells.map((c) => c.photoIds)).toEqual([
       ['h1', 'h2'],

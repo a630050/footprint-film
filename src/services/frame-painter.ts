@@ -1,12 +1,13 @@
-import {
-  CELL_ZOOM_END,
-  CELL_ZOOM_START,
-  COLLAGE_GAP_PX,
-  TRANSITION_FADE_MS
-} from '../constants/video-config'
+import { COLLAGE_GAP_PX, TRANSITION_FADE_MS } from '../constants/video-config'
 import { cameraAt, evaluateMoveSegmentAt } from '../domain/camera-path'
 import { formatJourneyDateRange, formatLocalDateDisplay } from '../domain/capture-time'
 import { resolveDisplayCellOverlayText } from '../domain/display-cells'
+import {
+  computeMotionTransform,
+  computePolaroidPlacements,
+  computeTileRects,
+  type Rect
+} from '../domain/page-geometry'
 import { locateTimelinePosition } from '../domain/timeline-builder'
 import { DEFAULT_VISUAL_THEME } from '../themes/default-theme'
 import type { DisplayCell, Journey, Photo, Segment, Station } from '../types/journey'
@@ -16,8 +17,8 @@ import { drawTravelerMarker, travelerMarkerRadius } from './traveler-marker'
 /** 地圖資料版權標示（OpenFreeMap / OpenMapTiles / OpenStreetMap 授權要求） */
 export const MAP_ATTRIBUTION_TEXT = 'OpenFreeMap © OpenMapTiles  Data © OpenStreetMap contributors'
 
-/** 同時保留在記憶體中的已解碼照片數量上限（單張 1920px 約 11MB，12 張約 130MB） */
-const MAX_DECODED_BITMAPS = 12
+/** 同時保留在記憶體中的已解碼照片數量上限（單張 1920px 約 11MB，14 張約 155MB；宮格一頁最多 9 張） */
+const MAX_DECODED_BITMAPS = 14
 
 /** 預先模糊背景的長邊像素（放大後即產生柔和模糊效果，所有瀏覽器皆一致） */
 const BLURRED_BACKGROUND_LONG_SIDE = 48
@@ -795,14 +796,14 @@ export class FramePainter {
     const currentCell = segment.cells[cellIdx]
     const cellProgress = currentCell.durationMs > 0 ? Math.min(1, cellElapsedMs / currentCell.durationMs) : 1
 
-    await this.drawDisplayCell(ctx, width, height, journey, currentCell, cellProgress, 1)
+    await this.drawDisplayCell(ctx, width, height, journey, currentCell, cellProgress, 1, 0)
 
     // 格與格之間最後 0.5 秒疊加下一格淡入
     const remainingMs = currentCell.durationMs - cellElapsedMs
     const nextCell = cellIdx < segment.cells.length - 1 ? segment.cells[cellIdx + 1] : undefined
     const nextAlpha = nextCell && remainingMs < TRANSITION_FADE_MS ? 1 - remainingMs / TRANSITION_FADE_MS : 0
     if (nextCell && nextAlpha > 0) {
-      await this.drawDisplayCell(ctx, width, height, journey, nextCell, 0, nextAlpha)
+      await this.drawDisplayCell(ctx, width, height, journey, nextCell, 0, nextAlpha, 1)
     }
 
     drawBottomGradientMask(ctx, width, height)
@@ -868,7 +869,38 @@ export class FramePainter {
   }
 
   /**
-   * 繪製單一展示格（單張或 2～3 張拼圖，格間距 6px，各自緩慢放大 1.0 → 1.08）
+   * 頁面設定視窗的即時預覽：只畫一頁（含運鏡），不畫文字
+   * @param progress 頁內進度 0 ~ 1
+   */
+  async renderPagePreview(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    journey: Journey,
+    cell: DisplayCell,
+    progress: number
+  ): Promise<void> {
+    ctx.fillStyle = '#020617'
+    ctx.fillRect(0, 0, width, height)
+    await this.drawDisplayCell(ctx, width, height, journey, cell, progress, 1, 0)
+  }
+
+  /** 每頁先組合在離屏畫布上，再整頁套用運鏡；同一幀最多兩頁（目前頁＋淡入的下一頁） */
+  private pageCanvases: HTMLCanvasElement[] = []
+
+  private getPageCanvas(slot: number, width: number, height: number): HTMLCanvasElement {
+    let canvas = this.pageCanvases[slot]
+    if (!canvas || canvas.width !== width || canvas.height !== height) {
+      canvas = createScratchCanvas(width, height)
+      this.pageCanvases[slot] = canvas
+    }
+    return canvas
+  }
+
+  /**
+   * 繪製一頁（展示格）：
+   * 1. 依拼接樣式把照片組合成一整張畫面（拍立得、依序出現、連拍輪動帶有頁內動畫）
+   * 2. 整頁一起套用運鏡（縮放＋平移），拼圖不會每小張各自移動
    */
   private async drawDisplayCell(
     ctx: CanvasRenderingContext2D,
@@ -877,50 +909,164 @@ export class FramePainter {
     journey: Journey,
     cell: DisplayCell,
     cellProgress: number,
-    alpha: number
+    alpha: number,
+    slot: number
   ): Promise<void> {
-    const zoom = CELL_ZOOM_START + (CELL_ZOOM_END - CELL_ZOOM_START) * cellProgress
     const photos = cell.photoIds
       .map((id) => journey.photos[id])
       .filter((p): p is Photo => Boolean(p))
-
     if (photos.length === 0) return
 
-    // 先完成全部解碼，再一次繪製，避免拼圖格中途被淘汰
-    const bitmaps = await Promise.all(photos.map((p) => this.getPhotoBitmap(p)))
+    const pageCanvas = this.getPageCanvas(slot, width, height)
+    const pctx = pageCanvas.getContext('2d')
+    if (!pctx) return
+    pctx.save()
+    pctx.clearRect(0, 0, width, height)
+    pctx.imageSmoothingEnabled = true
+    pctx.imageSmoothingQuality = 'high'
+    await this.composePage(pctx, width, height, cell, photos, cellProgress)
+    pctx.restore()
 
+    const { scale, centerOffsetX, centerOffsetY } = computeMotionTransform(cell.motion, cellProgress)
     ctx.save()
     ctx.globalAlpha = alpha
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.translate(width / 2, height / 2)
+    ctx.scale(scale, scale)
+    ctx.translate(-width / 2 - centerOffsetX * width, -height / 2 - centerOffsetY * height)
+    ctx.drawImage(pageCanvas, 0, 0)
+    ctx.restore()
+  }
 
-    if (photos.length === 1) {
-      const bmp = bitmaps[0]
-      if (bmp) {
-        this.drawPhotoAdaptive(ctx, photos[0], bmp, 0, 0, width, height, zoom, false)
+  /** 依拼接樣式把一頁的照片畫到離屏畫布上 */
+  private async composePage(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    cell: DisplayCell,
+    photos: Photo[],
+    progress: number
+  ): Promise<void> {
+    const count = photos.length
+    const ui = uiScaleFor(width, height)
+    const gap = COLLAGE_GAP_PX * ui
+
+    if (cell.layout === 'single' || count === 1) {
+      const bmp = await this.getPhotoBitmap(photos[0])
+      if (bmp) this.drawPhotoAdaptive(ctx, photos[0], bmp, 0, 0, width, height, 1, false)
+      return
+    }
+
+    if (cell.layout === 'burst') {
+      // 連拍輪動：依進度輪流顯示，每次換張時帶一下快門閃白
+      const exact = Math.min(count - 0.0001, progress * count)
+      const idx = Math.floor(exact)
+      const bmp = await this.getPhotoBitmap(photos[idx])
+      // 預先解碼下一張，避免換張時卡頓
+      if (idx + 1 < count) void this.getPhotoBitmap(photos[idx + 1])
+      if (bmp) this.drawPhotoAdaptive(ctx, photos[idx], bmp, 0, 0, width, height, 1, false)
+      const sinceSwitch = exact - idx
+      if (idx > 0 && sinceSwitch < 0.18) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.28 * (1 - sinceSwitch / 0.18)})`
+        ctx.fillRect(0, 0, width, height)
       }
-      ctx.restore()
+      return
+    }
+
+    const bitmaps = await Promise.all(photos.map((p) => this.getPhotoBitmap(p)))
+
+    if (cell.layout === 'polaroid') {
+      this.composePolaroids(ctx, width, height, photos, bitmaps, progress, cell.seed, ui)
       return
     }
 
     ctx.fillStyle = '#0f172a'
     ctx.fillRect(0, 0, width, height)
 
-    const isLandscapeVideo = width >= height
-    const count = photos.length
-    const gap = COLLAGE_GAP_PX * Math.max(0.65, Math.min(width, height) / 1080)
-
-    for (let i = 0; i < count; i++) {
-      const bmp = bitmaps[i]
-      if (!bmp) continue
-      if (isLandscapeVideo) {
-        const cellW = (width - gap * (count - 1)) / count
-        drawImageCover(ctx, bmp, i * (cellW + gap), 0, cellW, height, zoom)
-      } else {
-        const cellH = (height - gap * (count - 1)) / count
-        drawImageCover(ctx, bmp, 0, i * (cellH + gap), width, cellH, zoom)
+    if (cell.layout === 'reveal') {
+      // 依序出現：宮格中一張張浮現（前 55% 的時間內全部到位）
+      const rects = computeTileRects('grid', count, width, height, gap)
+      for (let i = 0; i < count; i++) {
+        const bmp = bitmaps[i]
+        if (!bmp) continue
+        const start = (i / count) * 0.55
+        const local = i === 0 && progress === 0 ? 1 : Math.max(0, Math.min(1, (progress - start) / 0.2))
+        if (local <= 0) continue
+        const eased = 1 - Math.pow(1 - local, 3)
+        const r = rects[i]
+        const lift = (1 - eased) * r.h * 0.08
+        const shrink = 0.94 + 0.06 * eased
+        ctx.save()
+        ctx.globalAlpha = eased
+        const w = r.w * shrink
+        const h = r.h * shrink
+        drawImageCover(ctx, bmp, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2 + lift, w, h, 1)
+        ctx.restore()
       }
+      return
     }
 
-    ctx.restore()
+    const rects = computeTileRects(cell.layout, count, width, height, gap)
+    rects.forEach((r: Rect, i) => {
+      const bmp = bitmaps[i]
+      if (bmp) drawImageCover(ctx, bmp, r.x, r.y, r.w, r.h, 1)
+    })
+  }
+
+  /** 拍立得：模糊背景上散放白框相片，前半段依序落下 */
+  private composePolaroids(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    photos: Photo[],
+    bitmaps: (ImageBitmap | null)[],
+    progress: number,
+    seed: number,
+    ui: number
+  ): void {
+    const firstIdx = bitmaps.findIndex((b) => Boolean(b))
+    const firstBmp = firstIdx >= 0 ? bitmaps[firstIdx] : null
+    if (firstBmp) {
+      drawImageCover(ctx, this.getBlurredBackground(photos[firstIdx], firstBmp), 0, 0, width, height, 1.1)
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.45)'
+      ctx.fillRect(0, 0, width, height)
+    } else {
+      ctx.fillStyle = '#0f172a'
+      ctx.fillRect(0, 0, width, height)
+    }
+
+    const placements = computePolaroidPlacements(photos.length, width, height, seed)
+    const dropWindow = 0.45
+    placements.forEach((pl, i) => {
+      const bmp = bitmaps[i]
+      if (!bmp) return
+      // 淡入到下一頁時（progress = 0）先露出第一張，其餘依序落下
+      const start = photos.length > 1 ? (i / (photos.length - 1)) * dropWindow : 0
+      const appear = i === 0 && progress === 0 ? 1 : Math.max(0, Math.min(1, (progress - start) / 0.16))
+      if (appear <= 0) return
+      const eased = 1 - Math.pow(1 - appear, 3)
+      const scale = 1.25 - 0.25 * eased
+
+      const frame = pl.size
+      const border = frame * 0.05
+      const photoBox = frame - border * 2
+      const bottomExtra = frame * 0.12
+
+      ctx.save()
+      ctx.globalAlpha = eased
+      ctx.translate(pl.cx, pl.cy - (1 - eased) * frame * 0.08)
+      ctx.rotate(pl.rotation)
+      ctx.scale(scale, scale)
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
+      ctx.shadowBlur = 24 * ui
+      ctx.shadowOffsetY = 8 * ui
+      ctx.fillStyle = '#fbfaf7'
+      ctx.fillRect(-frame / 2, -(frame + bottomExtra) / 2, frame, frame + bottomExtra)
+      ctx.shadowColor = 'transparent'
+      drawImageCover(ctx, bmp, -frame / 2 + border, -(frame + bottomExtra) / 2 + border, photoBox, photoBox, 1)
+      ctx.restore()
+    })
   }
 
   /**

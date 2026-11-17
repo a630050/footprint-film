@@ -13,7 +13,16 @@ const DRAFT_SAVE_DEBOUNCE_MS = 600
 
 /** 草稿中的照片：影像 Blob 另存於 photo-blobs，避免每次編輯都重寫數十 MB 的影像 */
 type StoredPhoto = Omit<Photo, 'imageBlob'> & { imageBlob?: Blob }
-type StoredJourney = Omit<Journey, 'photos'> & { photos: Record<string, StoredPhoto> }
+type StoredJourney = Omit<Journey, 'photos' | 'customMusic'> & {
+  photos: Record<string, StoredPhoto>
+  /** 上傳的配樂只存檔名，音樂檔本身另存於 photo-blobs（key: CUSTOM_MUSIC_KEY） */
+  customMusic?: { fileName: string; blob?: Blob }
+}
+
+/** 使用者上傳配樂在 photo-blobs 中的 key */
+const CUSTOM_MUSIC_KEY = 'music:custom'
+/** 已寫入的配樂 Blob（同一份不重複寫入） */
+let persistedMusicBlob: Blob | null = null
 
 let dbPromise: Promise<IDBPDatabase> | null = null
 
@@ -57,10 +66,31 @@ async function writeDraftNow(journey: Journey): Promise<void> {
       }
     }
 
-    const stored: StoredJourney = { ...journey, photos }
+    // 已刪除照片的影像一併從草稿移除，避免佔用儲存空間
+    for (const id of [...persistedBlobIds]) {
+      if (!journey.photos[id]) {
+        void blobStore.delete(id)
+        persistedBlobIds.delete(id)
+      }
+    }
+
+    // 上傳的配樂可能有數 MB，只在更換時寫入一次
+    const music = journey.customMusic
+    if (music && music.blob !== persistedMusicBlob) {
+      void blobStore.put(music.blob, CUSTOM_MUSIC_KEY)
+    } else if (!music && persistedMusicBlob) {
+      void blobStore.delete(CUSTOM_MUSIC_KEY)
+    }
+
+    const stored: StoredJourney = {
+      ...journey,
+      photos,
+      customMusic: music ? { fileName: music.fileName } : undefined
+    }
     void tx.objectStore(DRAFT_STORE).put(stored, SINGLE_DRAFT_KEY)
     await tx.done
     for (const id of newlyWritten) persistedBlobIds.add(id)
+    persistedMusicBlob = music?.blob ?? null
   } catch {
     // 隱私模式或儲存空間不足時忽略錯誤，不中斷使用者操作
   }
@@ -119,11 +149,21 @@ export async function loadJourneyDraft(): Promise<Journey | null> {
 
     if (Object.keys(photos).length === 0) return null
 
+    let customMusic: Journey['customMusic']
+    if (stored.customMusic) {
+      const blob = stored.customMusic.blob ?? ((await db.get(PHOTO_BLOB_STORE, CUSTOM_MUSIC_KEY)) as Blob | undefined)
+      if (blob) {
+        customMusic = { blob, fileName: stored.customMusic.fileName }
+        if (!stored.customMusic.blob) persistedMusicBlob = blob
+      }
+    }
+
     // 移除找不到影像的照片參照，避免後續渲染出錯
     const exists = (id: string) => Boolean(photos[id])
     return {
       ...stored,
       photos,
+      customMusic,
       // 舊版草稿沒有新增的設定欄位（例如移動標記），以預設值補齊
       settings: { ...DEFAULT_JOURNEY_SETTINGS, ...stored.settings },
       stations: stored.stations
@@ -154,6 +194,7 @@ export async function clearJourneyDraft(): Promise<void> {
     void tx.objectStore(PHOTO_BLOB_STORE).clear()
     await tx.done
     persistedBlobIds.clear()
+    persistedMusicBlob = null
   } catch {
     // 忽略清除錯誤
   }

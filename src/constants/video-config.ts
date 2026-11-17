@@ -54,8 +54,24 @@ export const DEFAULT_JOURNEY_SETTINGS: JourneySettings = {
   autoCollage: true,
   orientation: 'landscape',
   resolution: '1080p',
-  travelerMarker: 'dot'
+  travelerMarker: 'dot',
+  randomMotion: true,
+  randomLayout: true,
+  burstThresholdSec: 60,
+  music: { source: 'none', builtinTrackId: 'acoustic', volume: 0.8 }
 }
+
+/** 一頁可用拼圖版面的張數上限；超過時只能用宮格、拍立得或輪動效果 */
+export const MAX_COLLAGE_PHOTOS = 4
+
+/** 一頁最多可放的照片數（宮格 3×3） */
+export const MAX_GRID_PHOTOS = 9
+
+/** 連拍自動成頁時，一頁最多幾張（超過就切成多頁） */
+export const MAX_AUTO_BURST_PHOTOS = 12
+
+/** 連拍輪動時每張停留的秒數 */
+export const BURST_SECONDS_PER_PHOTO = 0.5
 
 /**
  * 根據影片方向與解析度取得畫布寬高

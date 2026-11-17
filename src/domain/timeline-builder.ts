@@ -8,7 +8,7 @@ import {
 } from '../constants/video-config'
 import type { Coordinates, Journey, RouteKind, Segment } from '../types/journey'
 import { unwrapLongitudeNear, unwrapRouteLongitudes } from './camera-path'
-import { buildStationDisplayCells } from './display-cells'
+import { buildStationCells } from './pages'
 import { calculateDistanceKm } from './station-clustering'
 
 /**
@@ -126,14 +126,7 @@ export function buildJourneyTimeline(
 ): Segment[] {
   const activeStations = journey.stations
     .map((station) => {
-      const stationPhotos = station.photoIds
-        .map((id) => journey.photos[id])
-        .filter((p): p is NonNullable<typeof p> => Boolean(p))
-      const cells = buildStationDisplayCells(stationPhotos, {
-        orientation: journey.settings.orientation,
-        secondsPerCell: journey.settings.secondsPerCell,
-        autoCollage: journey.settings.autoCollage
-      })
+      const cells = buildStationCells(station, journey.photos, journey.settings)
       return { station, cells }
     })
     .filter((item) => item.cells.length > 0)

@@ -61,6 +61,9 @@ export function ExportPanel() {
           `有 ${res.incompleteMapFrames} 幀地圖在等待逾時前未完整載入（網路較慢或不穩），影片中可能出現缺塊，建議網路穩定時重新輸出。`
         )
       }
+      if (res.audioSkipped) {
+        setDowngradeNotice('這個瀏覽器無法編碼音訊，影片已輸出但沒有配樂。建議改用最新版 Chrome、Edge 或 Safari。')
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         setErrorMsg('已取消影片輸出。')

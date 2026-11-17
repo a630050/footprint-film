@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { BUILTIN_TRACKS } from '../constants/music-library'
 
 interface CreditEntry {
   name: string
@@ -23,6 +24,7 @@ const OPEN_SOURCE_LIBRARIES: CreditEntry[] = [
   },
   { name: 'idb', license: 'ISC', url: 'https://github.com/jakearchibald/idb' },
   { name: 'Turf.js', license: 'MIT', url: 'https://turfjs.org/', note: '地理距離與路線計算' },
+  { name: 'dnd kit', license: 'MIT', url: 'https://dndkit.com/', note: '照片拖曳排序' },
   { name: 'Lucide 圖示', license: 'ISC', url: 'https://lucide.dev/' },
   { name: 'Tailwind CSS', license: 'MIT', url: 'https://tailwindcss.com/' },
   { name: 'Vite', license: 'MIT', url: 'https://vite.dev/', note: '建置工具' },
@@ -48,6 +50,14 @@ const MAP_DATA_AND_SERVICES: CreditEntry[] = [
   },
   { name: 'OSRM', license: 'BSD-2-Clause', url: 'https://project-osrm.org/', note: '公開示範伺服器，規劃陸路路線' }
 ]
+
+/** 內建配樂（CC0 公眾領域，不需標示，仍列出以示感謝） */
+const MUSIC_CREDITS: CreditEntry[] = BUILTIN_TRACKS.map((t) => ({
+  name: `${t.title}`,
+  license: 'CC0',
+  url: t.sourceUrl,
+  note: `${t.style} · ${t.author}（OpenGameArt）`
+}))
 
 function CreditList({ title, entries }: { title: string; entries: CreditEntry[] }) {
   return (
@@ -146,6 +156,7 @@ export function CreditsFooter() {
                 <h3 className="text-sm font-bold text-white">致謝</h3>
                 <CreditList title="開源套件" entries={OPEN_SOURCE_LIBRARIES} />
                 <CreditList title="地圖資料與線上服務" entries={MAP_DATA_AND_SERVICES} />
+                <CreditList title="內建配樂" entries={MUSIC_CREDITS} />
                 <p className="leading-relaxed text-slate-400">
                   以上專案的著作權均屬各原作者與貢獻者所有，並依各自的授權條款使用；完整條款請見各專案網站。影片中的地圖畫面依授權要求標示「©
                   OpenMapTiles」與「© OpenStreetMap contributors」。

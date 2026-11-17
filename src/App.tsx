@@ -4,6 +4,8 @@ import { ExportPanel } from './components/ExportPanel'
 import { JourneyEditor } from './components/JourneyEditor'
 import { PhotoPicker } from './components/PhotoPicker'
 import { CreditsFooter } from './components/CreditsFooter'
+import { DeletedPhotoToast } from './components/DeletedPhotoToast'
+import { MusicPicker } from './components/MusicPicker'
 import { PreviewPlayer } from './components/PreviewPlayer'
 import { TravelerMarkerPicker } from './components/TravelerMarkerPicker'
 import { isWebCodecsSupported } from './services/browser-support'
@@ -161,12 +163,14 @@ export function App() {
           <div className="mx-auto max-w-4xl space-y-5 px-4 py-5">
             <PreviewPlayer />
             <TravelerMarkerPicker />
+            <MusicPicker />
             <ExportPanel />
           </div>
         )}
       </main>
 
       <CreditsFooter />
+      <DeletedPhotoToast />
     </div>
   )
 }
