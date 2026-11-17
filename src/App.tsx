@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react'
 import { ExportPanel } from './components/ExportPanel'
 import { JourneyEditor } from './components/JourneyEditor'
 import { PhotoPicker } from './components/PhotoPicker'
+import { CreditsFooter } from './components/CreditsFooter'
 import { PreviewPlayer } from './components/PreviewPlayer'
+import { TravelerMarkerPicker } from './components/TravelerMarkerPicker'
 import { isWebCodecsSupported } from './services/browser-support'
 import { useJourneyStore } from './store/journey-store'
 
@@ -158,10 +160,13 @@ export function App() {
         {currentStep === 3 && (
           <div className="mx-auto max-w-4xl space-y-5 px-4 py-5">
             <PreviewPlayer />
+            <TravelerMarkerPicker />
             <ExportPanel />
           </div>
         )}
       </main>
+
+      <CreditsFooter />
     </div>
   )
 }

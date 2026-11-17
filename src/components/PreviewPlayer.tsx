@@ -1,4 +1,4 @@
-import { Loader2, Pause, Play, RotateCcw } from 'lucide-react'
+import { Loader2, Maximize, Minimize, Pause, Play, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getVideoDimensions } from '../constants/video-config'
 import { useJourneySummary } from '../hooks/use-journey-summary'
@@ -8,6 +8,20 @@ import { useJourneyStore } from '../store/journey-store'
 
 /** 播放時更新時間軸滑桿顯示的間隔（毫秒）；畫面本身每幀都會重畫，但不必每幀觸發 React 重新渲染 */
 const SCRUBBER_UPDATE_INTERVAL_MS = 100
+
+/** 兩次點擊／觸控在這個間隔內視為雙擊（手機 Safari 不一定會送出 dblclick，因此自己判斷） */
+const DOUBLE_TAP_INTERVAL_MS = 300
+
+type FullscreenCapableElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }
+type FullscreenCapableDocument = Document & {
+  webkitFullscreenElement?: Element | null
+  webkitExitFullscreen?: () => Promise<void> | void
+}
+
+function getNativeFullscreenElement(): Element | null {
+  const doc = document as FullscreenCapableDocument
+  return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null
+}
 
 function formatMmSs(ms: number): string {
   const totalSec = Math.floor(ms / 1000)
@@ -27,6 +41,8 @@ export function PreviewPlayer() {
   const summary = useJourneySummary()
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const playerRef = useRef<HTMLDivElement | null>(null)
+  const lastTapRef = useRef(0)
   const mapRendererRef = useRef<DeterministicMapRenderer | null>(null)
   const framePainterRef = useRef<FramePainter | null>(null)
 
@@ -40,6 +56,11 @@ export function PreviewPlayer() {
   const [displayTimeMs, setDisplayTimeMs] = useState(0)
   const [isMapReady, setIsMapReady] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
+  const [mapRetryCount, setMapRetryCount] = useState(0)
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false)
+  /** 不支援元素全螢幕的瀏覽器（iPhone Safari）改用鋪滿視窗的假全螢幕 */
+  const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false)
+  const isFullscreen = isNativeFullscreen || isPseudoFullscreen
 
   // 預覽固定以 720p 畫布繪製，兼顧流暢度與清晰度
   const previewDims = getVideoDimensions(journey.settings.orientation, '720p')
@@ -112,7 +133,7 @@ export function PreviewPlayer() {
       mapRendererRef.current = null
       framePainterRef.current = null
     }
-  }, [previewDims.width, previewDims.height, requestRender])
+  }, [previewDims.width, previewDims.height, requestRender, mapRetryCount])
 
   // 旅程內容或時間軸改變時重畫目前這一幀
   useEffect(() => {
@@ -154,6 +175,73 @@ export function PreviewPlayer() {
     return () => cancelAnimationFrame(rafId)
   }, [isPlaying, totalDurationMs, requestRender])
 
+  useEffect(() => {
+    const onChange = () => setIsNativeFullscreen(getNativeFullscreenElement() === playerRef.current)
+    document.addEventListener('fullscreenchange', onChange)
+    document.addEventListener('webkitfullscreenchange', onChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange)
+      document.removeEventListener('webkitfullscreenchange', onChange)
+    }
+  }, [])
+
+  // 假全螢幕時按 Esc 離開，並暫停頁面捲動
+  useEffect(() => {
+    if (!isPseudoFullscreen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsPseudoFullscreen(false)
+    }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [isPseudoFullscreen])
+
+  const toggleFullscreen = async () => {
+    const doc = document as FullscreenCapableDocument
+    // 已在全螢幕（真的或假的）：一律離開
+    if (isPseudoFullscreen || getNativeFullscreenElement()) {
+      setIsPseudoFullscreen(false)
+      if (getNativeFullscreenElement()) {
+        await (doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.())
+      }
+      return
+    }
+    const el = playerRef.current as FullscreenCapableElement | null
+    if (!el) return
+    try {
+      const request = el.requestFullscreen
+        ? el.requestFullscreen()
+        : el.webkitRequestFullscreen
+          ? el.webkitRequestFullscreen()
+          : Promise.reject(new Error('unsupported'))
+      // 部分 App 內建瀏覽器（例如 LINE）的全螢幕請求不會回應，1 秒內沒進入全螢幕就改用假全螢幕
+      await Promise.race([request, new Promise((resolve) => setTimeout(resolve, 1000))])
+      if (getNativeFullscreenElement() !== el) throw new Error('not entered')
+    } catch {
+      setIsPseudoFullscreen(true)
+      return
+    }
+    // 手機上播放橫式影片時嘗試轉成橫向（僅部分 Android 瀏覽器支援，失敗就維持原方向）
+    if (journey.settings.orientation === 'landscape') {
+      const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
+      await orientation?.lock?.('landscape').catch(() => undefined)
+    }
+  }
+
+  const handleCanvasPointerUp = () => {
+    const now = performance.now()
+    if (now - lastTapRef.current < DOUBLE_TAP_INTERVAL_MS) {
+      lastTapRef.current = 0
+      void toggleFullscreen()
+    } else {
+      lastTapRef.current = now
+    }
+  }
+
   const seekTo = (ms: number) => {
     timeRef.current = ms
     setDisplayTimeMs(ms)
@@ -161,29 +249,59 @@ export function PreviewPlayer() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-4 shadow-xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-        <span className="font-semibold text-slate-200">
-          即時預覽（{journey.settings.orientation === 'landscape' ? '橫式 16:9' : '直式 9:16'}）
-        </span>
-        <span>預覽時地圖圖磚偶爾延遲屬正常現象，正式輸出會逐幀等待完整繪製</span>
-      </div>
+    <div
+      ref={playerRef}
+      className={
+        isFullscreen
+          ? `flex flex-col gap-3 bg-black p-2 sm:p-4 ${isPseudoFullscreen ? 'fixed inset-0 z-50' : 'h-full w-full'}`
+          : 'rounded-2xl border border-slate-800 bg-slate-900/90 p-4 shadow-xl space-y-4'
+      }
+    >
+      {!isFullscreen && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+          <span className="font-semibold text-slate-200">
+            即時預覽（{journey.settings.orientation === 'landscape' ? '橫式 16:9' : '直式 9:16'}）
+          </span>
+          <span>雙擊畫面可切換全螢幕 · 預覽時地圖偶爾延遲屬正常，正式輸出會逐幀等待完整繪製</span>
+        </div>
+      )}
 
-      <div className="relative flex justify-center bg-slate-950/90 rounded-xl p-2 border border-slate-800/80">
+      <div
+        className={
+          isFullscreen
+            ? 'relative flex min-h-0 flex-1 items-center justify-center'
+            : 'relative flex justify-center bg-slate-950/90 rounded-xl p-2 border border-slate-800/80'
+        }
+      >
         <canvas
           ref={canvasRef}
           width={previewDims.width}
           height={previewDims.height}
-          className={`rounded-lg shadow-2xl ${
-            journey.settings.orientation === 'landscape'
-              ? 'aspect-video w-full max-w-3xl'
-              : 'aspect-[9/16] h-[62vh] max-h-[640px] w-auto'
+          onPointerUp={handleCanvasPointerUp}
+          title="雙擊切換全螢幕"
+          className={`touch-manipulation select-none ${
+            isFullscreen
+              ? 'h-full w-full object-contain'
+              : `rounded-lg shadow-2xl ${
+                  journey.settings.orientation === 'landscape'
+                    ? 'aspect-video w-full max-w-3xl'
+                    : 'aspect-[9/16] h-[62vh] max-h-[640px] w-auto'
+                }`
           }`}
         />
         {!isMapReady && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-slate-300">
             {mapError ? (
-              <span className="text-rose-300">{mapError}</span>
+              <span className="flex flex-col items-center gap-2 text-center">
+                <span className="text-rose-300">{mapError}</span>
+                <button
+                  type="button"
+                  onClick={() => setMapRetryCount((n) => n + 1)}
+                  className="rounded-lg bg-amber-500 px-3 py-1.5 font-bold text-slate-950 hover:bg-amber-400 transition"
+                >
+                  重新載入地圖
+                </button>
+              </span>
             ) : (
               <>
                 <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
@@ -238,6 +356,16 @@ export function PreviewPlayer() {
         <span className="w-24 text-right font-mono text-xs text-slate-300">
           {formatMmSs(displayTimeMs)} / {formatMmSs(totalDurationMs)}
         </span>
+
+        <button
+          type="button"
+          title={isFullscreen ? '離開全螢幕' : '全螢幕'}
+          aria-label={isFullscreen ? '離開全螢幕' : '全螢幕'}
+          onClick={() => void toggleFullscreen()}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
+        >
+          {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+        </button>
       </div>
     </div>
   )

@@ -1,6 +1,8 @@
 import {
   CAMERA_FIT_PADDING_RATIO,
-  MAX_CAMERA_FIT_ZOOM
+  MAX_CAMERA_FIT_ZOOM,
+  MAX_MOVE_FIT_ZOOM,
+  MOVE_FIT_PADDING
 } from '../constants/video-config'
 import type { CameraState, Coordinates, Segment, Station } from '../types/journey'
 
@@ -106,13 +108,18 @@ function inverseMercatorY(y: number): number {
  * @param points 座標陣列
  * @param viewport 畫布尺寸（預設 1920x1080）
  * @param maxZoom 最大縮放層級上限（預設 MAX_CAMERA_FIT_ZOOM = 10）
+ * @param padding 留白比例：數字代表四周相同（預設 CAMERA_FIT_PADDING_RATIO = 0.25），
+ *   或分別指定上、下、左右——例如上方多留給地名氣泡、下方多留給字幕
  * @returns 中心座標 [lng, lat] 與 zoom
  */
 export function computeFitBoundsCamera(
   points: Coordinates[],
   viewport: { width: number; height: number } = DEFAULT_VIEWPORT,
-  maxZoom: number = MAX_CAMERA_FIT_ZOOM
+  maxZoom: number = MAX_CAMERA_FIT_ZOOM,
+  padding: number | FitPadding = CAMERA_FIT_PADDING_RATIO
 ): { center: [number, number]; zoom: number } {
+  const pad: FitPadding =
+    typeof padding === 'number' ? { top: padding, bottom: padding, side: padding } : padding
   if (points.length === 0) {
     return { center: [121.0, 23.5], zoom: 4 }
   }
@@ -130,15 +137,13 @@ export function computeFitBoundsCamera(
   const maxY = Math.max(...ys)
 
   const centerLng = normalizeLongitude((west + east) / 2)
-  const centerLat = inverseMercatorY((minY + maxY) / 2)
 
   const lngFraction = (east - west) / 360
   const latFraction = maxY - minY
 
-  // 扣除四周各 25% 邊距後，內部可用寬高佔 50%
-  const usableRatio = Math.max(0.1, 1 - CAMERA_FIT_PADDING_RATIO * 2)
-  const effectiveWidth = viewport.width * usableRatio
-  const effectiveHeight = viewport.height * usableRatio
+  // 扣除邊距後的可用寬高（預設四周各 25%，可用 50%）
+  const effectiveWidth = viewport.width * Math.max(0.1, 1 - pad.side * 2)
+  const effectiveHeight = viewport.height * Math.max(0.1, 1 - pad.top - pad.bottom)
 
   const zoomFromLng =
     lngFraction > 1e-9 ? Math.log2(effectiveWidth / WORLD_TILE_SIZE / lngFraction) : maxZoom
@@ -146,12 +151,25 @@ export function computeFitBoundsCamera(
     latFraction > 1e-9 ? Math.log2(effectiveHeight / WORLD_TILE_SIZE / latFraction) : maxZoom
 
   const rawZoom = Math.min(zoomFromLng, zoomFromLat)
-  const clampedZoom = Math.max(0.5, Math.min(rawZoom, maxZoom))
+  const zoom = Number(Math.max(0.5, Math.min(rawZoom, maxZoom)).toFixed(3))
+
+  // 上下邊距不同時，內容的中心不在畫面正中央：把鏡頭中心往反方向移，讓內容落在可用區域中間
+  const contentCenterFromTop = (pad.top + (1 - pad.bottom)) / 2
+  const shiftPx = (contentCenterFromTop - 0.5) * viewport.height
+  const worldSize = WORLD_TILE_SIZE * Math.pow(2, zoom)
+  const centerY = (minY + maxY) / 2 - shiftPx / worldSize
 
   return {
-    center: [centerLng, centerLat],
-    zoom: Number(clampedZoom.toFixed(3))
+    center: [centerLng, inverseMercatorY(centerY)],
+    zoom
   }
+}
+
+/** 框選留白比例（相對於畫面寬高） */
+export interface FitPadding {
+  top: number
+  bottom: number
+  side: number
 }
 
 /**
@@ -270,30 +288,56 @@ const MOVE_HOLD_END_SEC = 0.6
 const MOVE_TRAVEL_END_SEC = 2.8
 
 /**
+ * 移動段的起始與結束鏡頭：
+ * - 結束鏡頭框住起訖點與路線（上 22%、下 20%、左右 14% 留白），近距離時最多推近到 MAX_MOVE_FIT_ZOOM（街道層級），讓路線佔滿畫面
+ * - 起始鏡頭以起點為中心；縮放取「結束鏡頭」與「城市層級 10」較近者——
+ *   近距離移動時起訖鏡頭同一縮放層級，只做平移、不會先拉高再降下；長途移動則從城市層級拉遠
+ */
+export function computeMoveCameras(
+  fromStation: Station,
+  toStation: Station,
+  viewport: { width: number; height: number } = DEFAULT_VIEWPORT,
+  route?: [number, number][]
+): { start: { center: [number, number]; zoom: number }; end: { center: [number, number]; zoom: number } } {
+  // 一併框住路線本身：道路會繞路、大圓弧線會往高緯度彎，只框起訖點時路線可能跑出畫面
+  const routePoints: Coordinates[] = []
+  if (route && route.length > 2) {
+    const step = Math.max(1, Math.floor(route.length / 48))
+    for (let i = 0; i < route.length; i += step) {
+      routePoints.push({ longitude: route[i][0], latitude: route[i][1] })
+    }
+  }
+  const end = computeFitBoundsCamera(
+    [fromStation.center, toStation.center, ...routePoints],
+    viewport,
+    MAX_MOVE_FIT_ZOOM,
+    MOVE_FIT_PADDING
+  )
+  const start = {
+    center: [fromStation.center.longitude, fromStation.center.latitude] as [number, number],
+    zoom: Math.min(MAX_MOVE_FIT_ZOOM, Math.max(end.zoom, MAX_CAMERA_FIT_ZOOM))
+  }
+  return { start, end }
+}
+
+/**
  * 依據規格書 §2.4 計算移動段（3.5 秒）在進度 t ∈ [0, 1] 時的精確狀態：
- * - 0.0 – 0.6s：鏡頭停在起點站點（受最大 zoom ≤ 10 限制），顯示起點標記與地名氣泡
- * - 0.6 – 2.8s：鏡頭以平滑縮放公式移至能同時框住起訖點的範圍（四周留 25% 邊距，zoom ≤ 10），路線依 ease-in-out cubic 從 0% 延伸至 100%
+ * - 0.0 – 0.6s：鏡頭停在起點站點，顯示起點標記與地名氣泡
+ * - 0.6 – 2.8s：鏡頭以平滑縮放公式移至能同時框住起訖點的範圍，路線依 ease-in-out cubic 從 0% 延伸至 100%
  * - 2.8 – 3.5s：抵達終點，終點標記帶回彈動效彈出，顯示地名氣泡與底部字幕
+ * NOTE: 近距離站點會推近到街道層級（見 computeMoveCameras），長途移動維持城市層級以上的視野
  */
 export function evaluateMoveSegmentAt(
   fromStation: Station,
   toStation: Station,
   t: number,
-  viewport: { width: number; height: number } = DEFAULT_VIEWPORT
+  viewport: { width: number; height: number } = DEFAULT_VIEWPORT,
+  route?: [number, number][]
 ): MoveSegmentFrameState {
   const clampedT = Math.max(0, Math.min(1, t))
   const sec = clampedT * MOVE_TOTAL_SEC
 
-  const startCamera = {
-    center: [fromStation.center.longitude, fromStation.center.latitude] as [number, number],
-    zoom: MAX_CAMERA_FIT_ZOOM
-  }
-
-  const fitBothCamera = computeFitBoundsCamera(
-    [fromStation.center, toStation.center],
-    viewport,
-    MAX_CAMERA_FIT_ZOOM
-  )
+  const { start: startCamera, end: fitBothCamera } = computeMoveCameras(fromStation, toStation, viewport, route)
 
   if (sec <= MOVE_HOLD_END_SEC) {
     return {
@@ -311,7 +355,7 @@ export function evaluateMoveSegmentAt(
       startCamera,
       fitBothCamera,
       phaseProgress,
-      MAX_CAMERA_FIT_ZOOM,
+      MAX_MOVE_FIT_ZOOM,
       viewport
     )
     return {
@@ -386,7 +430,7 @@ export function cameraAt(
     if (!fromSt || !toSt) {
       return { center: [121.0, 23.5], zoom: 5, bearing: 0, pitch: 0 }
     }
-    return evaluateMoveSegmentAt(fromSt, toSt, clampedT, viewport).camera
+    return evaluateMoveSegmentAt(fromSt, toSt, clampedT, viewport, segment.route).camera
   }
 
   if (segment.type === 'OUTRO') {

@@ -1,4 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb'
+import { DEFAULT_JOURNEY_SETTINGS } from '../constants/video-config'
 import type { Journey, Photo } from '../types/journey'
 
 const DB_NAME = 'travel-video-web-db'
@@ -123,6 +124,8 @@ export async function loadJourneyDraft(): Promise<Journey | null> {
     return {
       ...stored,
       photos,
+      // 舊版草稿沒有新增的設定欄位（例如移動標記），以預設值補齊
+      settings: { ...DEFAULT_JOURNEY_SETTINGS, ...stored.settings },
       stations: stored.stations
         .map((st) => ({ ...st, photoIds: st.photoIds.filter(exists) }))
         .filter((st) => st.photoIds.length > 0),

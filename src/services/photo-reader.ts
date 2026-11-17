@@ -170,7 +170,7 @@ async function downscaleImageBlob(
  * 處理 HEIC 檔案：先嘗試瀏覽器原生解碼（如 iOS/macOS Safari），失敗時才動態載入 `heic2any`
  * @param file HEIC 檔案
  */
-async function decodeAndDownscaleWithHeicFallback(
+export async function decodeAndDownscaleWithHeicFallback(
   file: File
 ): Promise<{ imageBlob: Blob; width: number; height: number }> {
   try {

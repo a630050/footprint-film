@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   computeFitBoundsCamera,
   computeLongitudeSpan,
+  computeMoveCameras,
+  evaluateMoveSegmentAt,
   interpolateCameraSmooth,
   unwrapRouteLongitudes
 } from '../src/domain/camera-path'
@@ -11,8 +13,8 @@ import {
   groundRouteKey,
   locateTimelinePosition
 } from '../src/domain/timeline-builder'
-import { MAX_CAMERA_FIT_ZOOM } from '../src/constants/video-config'
-import type { Photo, Segment } from '../src/types/journey'
+import { MAX_CAMERA_FIT_ZOOM, MAX_MOVE_FIT_ZOOM } from '../src/constants/video-config'
+import type { Photo, Segment, Station } from '../src/types/journey'
 
 function makePhoto(id: string, t: number, lat: number, lng: number): Photo {
   return {
@@ -73,6 +75,60 @@ describe('camera-path: van Wijk 平滑縮放運鏡', () => {
       // 合法路徑上的經度只會落在 174.76 → 180 / -180 → -157.86 之間
       expect(lng >= 170 || lng <= -150).toBe(true)
     }
+  })
+})
+
+describe('camera-path: 移動段鏡頭（近距離沉浸式視角）', () => {
+  const station = (id: string, lat: number, lng: number): Station => ({
+    id,
+    photoIds: [],
+    center: { latitude: lat, longitude: lng },
+    autoName: id
+  })
+  const viewport = { width: 1920, height: 1080 }
+
+  it('相距約 1 公里的站點推近到街道層級，路線至少佔畫面寬度的一半', () => {
+    // 台北同一緯度往東約 1 公里
+    const a = station('a', 25.033, 121.5654)
+    const b = station('b', 25.033, 121.5753)
+    const { start, end } = computeMoveCameras(a, b, viewport)
+    expect(end.zoom).toBeGreaterThanOrEqual(15)
+    expect(end.zoom).toBeLessThanOrEqual(MAX_MOVE_FIT_ZOOM)
+    // 起訖鏡頭同一縮放層級：只平移，不會先拉高再降下
+    expect(start.zoom).toBeCloseTo(end.zoom, 3)
+
+    // 路線在畫面上的像素長度（Web Mercator，512px 世界瓦片）
+    const worldPx = 512 * Math.pow(2, end.zoom)
+    const routePx = ((b.center.longitude - a.center.longitude) / 360) * worldPx
+    expect(routePx / viewport.width).toBeGreaterThan(0.5)
+
+    for (let i = 0; i <= 20; i++) {
+      const cam = evaluateMoveSegmentAt(a, b, i / 20, viewport).camera
+      expect(cam.zoom).toBeGreaterThan(end.zoom - 1)
+    }
+  })
+
+  it('長途移動仍從城市層級拉遠，不會推近到街道', () => {
+    const taipei = station('tp', 25.033, 121.5654)
+    const tokyo = station('tk', 35.6762, 139.6503)
+    const { start, end } = computeMoveCameras(taipei, tokyo, viewport)
+    expect(start.zoom).toBe(MAX_CAMERA_FIT_ZOOM)
+    expect(end.zoom).toBeLessThan(MAX_CAMERA_FIT_ZOOM)
+  })
+
+  it('繞路的道路也會被框進畫面', () => {
+    const a = station('a', 25.033, 121.5654)
+    const b = station('b', 25.033, 121.5753)
+    const detour: [number, number][] = [
+      [121.5654, 25.033],
+      [121.5654, 25.045],
+      [121.5753, 25.045],
+      [121.5753, 25.033]
+    ]
+    const withoutRoute = computeMoveCameras(a, b, viewport).end
+    const withRoute = computeMoveCameras(a, b, viewport, detour).end
+    expect(withRoute.zoom).toBeLessThan(withoutRoute.zoom)
+    expect(withRoute.center[1]).toBeGreaterThan(25.035)
   })
 })
 

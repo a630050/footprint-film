@@ -27,7 +27,7 @@ import {
   evaluateMoveSegmentAt
 } from '../src/domain/camera-path'
 import { generateJourneyTitle } from '../src/domain/journey-title'
-import { DEFAULT_JOURNEY_SETTINGS, MAX_CAMERA_FIT_ZOOM } from '../src/constants/video-config'
+import { DEFAULT_JOURNEY_SETTINGS, MAX_CAMERA_FIT_ZOOM, MAX_MOVE_FIT_ZOOM } from '../src/constants/video-config'
 import type { Journey, Photo, Station } from '../src/types/journey'
 
 /** 建立測試用照片輔助函式 */
@@ -273,7 +273,7 @@ describe('timeline-builder: 長度估算範例 (§2.6)', () => {
 })
 
 describe('camera-path & journey-title: 鏡頭縮放限制與旅程標題產生', () => {
-  it('短距離移動時，鏡頭縮放層級不超過 MAX_CAMERA_FIT_ZOOM (zoom <= 10)', () => {
+  it('短距離移動時推近到街道層級，但不超過 MAX_MOVE_FIT_ZOOM', () => {
     const stA: Station = {
       id: 's1',
       photoIds: [],
@@ -292,7 +292,8 @@ describe('camera-path & journey-title: 鏡頭縮放限制與旅程標題產生',
 
     for (const t of [0, 0.1, 0.5, 0.85, 1]) {
       const state = evaluateMoveSegmentAt(stA, stB, t)
-      expect(state.camera.zoom).toBeLessThanOrEqual(MAX_CAMERA_FIT_ZOOM)
+      expect(state.camera.zoom).toBeLessThanOrEqual(MAX_MOVE_FIT_ZOOM)
+      expect(state.camera.zoom).toBeGreaterThan(MAX_CAMERA_FIT_ZOOM)
       const cam = cameraAt(
         {
           type: 'MOVE',
@@ -308,7 +309,7 @@ describe('camera-path & journey-title: 鏡頭縮放限制與旅程標題產生',
         t,
         [stA, stB]
       )
-      expect(cam.zoom).toBeLessThanOrEqual(MAX_CAMERA_FIT_ZOOM)
+      expect(cam.zoom).toBeLessThanOrEqual(MAX_MOVE_FIT_ZOOM)
     }
   })
 

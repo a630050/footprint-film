@@ -25,11 +25,23 @@ export const COLLAGE_GAP_PX = 6
 export const CELL_ZOOM_START = 1.0
 export const CELL_ZOOM_END = 1.08
 
-/** 移動段框住起訖點的最大推近層級（避免短距離移動看到街道細節） */
+/** 開場、片尾與長途移動起點的城市層級縮放 */
 export const MAX_CAMERA_FIT_ZOOM = 10
 
-/** 移動段四周留白比例 */
+/** 全覽（開場、片尾）四周留白比例 */
 export const CAMERA_FIT_PADDING_RATIO = 0.25
+
+/**
+ * 移動段框住起訖點時允許的最大推近層級：近距離站點（1–3 公里）要看得到街道，
+ * 路線才會在畫面上拉得夠長，有身歷其境的感覺（zoom 16.5：東西向 1 公里約佔畫面寬度的 68%）
+ */
+export const MAX_MOVE_FIT_ZOOM = 16.5
+
+/**
+ * 移動段留白比例（比全覽小，讓路線佔滿更多畫面）：
+ * 上方多留給終點的地名氣泡與移動標記，下方多留給「前往 …」字幕
+ */
+export const MOVE_FIT_PADDING = { top: 0.22, bottom: 0.2, side: 0.14 }
 
 /** Nominatim 反向地理編碼最小請求間隔（毫秒） */
 export const NOMINATIM_MIN_INTERVAL_MS = 1100
@@ -41,7 +53,8 @@ export const DEFAULT_JOURNEY_SETTINGS: JourneySettings = {
   secondsPerCell: 2,
   autoCollage: true,
   orientation: 'landscape',
-  resolution: '1080p'
+  resolution: '1080p',
+  travelerMarker: 'dot'
 }
 
 /**

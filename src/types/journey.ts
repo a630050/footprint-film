@@ -45,6 +45,9 @@ export type VideoOrientation = 'landscape' | 'portrait'
 /** 影片解析度 */
 export type VideoResolution = '1080p' | '720p'
 
+/** 移動標記樣式：dot=圓點、person=小人、avatar=使用者上傳的圓形大頭照 */
+export type TravelerMarkerStyle = 'dot' | 'person' | 'avatar'
+
 /** 旅程設定參數 */
 export interface JourneySettings {
   stationRadiusKm: number        // 分站半徑，預設 10
@@ -53,6 +56,7 @@ export interface JourneySettings {
   autoCollage: boolean           // 自動拼圖，預設 true
   orientation: VideoOrientation  // 預設 landscape
   resolution: VideoResolution    // 預設 1080p
+  travelerMarker: TravelerMarkerStyle // 移動段沿路線前進的標記，預設 dot
 }
 
 /** 旅程（同時也是草稿的內容） */
@@ -64,6 +68,7 @@ export interface Journey {
   isTitleCustomized: boolean
   coverPhotoId?: string          // 封面照片
   hasManualStationEdits: boolean // 決定調整分站半徑時是否需要確認
+  travelerAvatar?: Blob          // 裁切好的圓形大頭照（正方形 JPEG），移動標記選 avatar 時使用
   settings: JourneySettings
 }
 

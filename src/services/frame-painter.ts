@@ -11,6 +11,7 @@ import { locateTimelinePosition } from '../domain/timeline-builder'
 import { DEFAULT_VISUAL_THEME } from '../themes/default-theme'
 import type { DisplayCell, Journey, Photo, Segment, Station } from '../types/journey'
 import { DeterministicMapRenderer, sliceRouteByProgress } from './map-renderer'
+import { drawTravelerMarker, travelerMarkerRadius } from './traveler-marker'
 
 /** 地圖資料版權標示（OpenFreeMap / OpenMapTiles / OpenStreetMap 授權要求） */
 export const MAP_ATTRIBUTION_TEXT = 'OpenFreeMap © OpenMapTiles  Data © OpenStreetMap contributors'
@@ -20,6 +21,14 @@ const MAX_DECODED_BITMAPS = 12
 
 /** 預先模糊背景的長邊像素（放大後即產生柔和模糊效果，所有瀏覽器皆一致） */
 const BLURRED_BACKGROUND_LONG_SIDE = 48
+
+/**
+ * 畫面文字與標記的比例：以 1080p 為 1，720p 約 0.67。
+ * 文字大小以「手機全螢幕觀看時一般視力可輕鬆閱讀」為準：地名約 40px（1080p）
+ */
+function uiScaleFor(width: number, height: number): number {
+  return Math.max(0.65, Math.min(width, height) / 1080)
+}
 
 /**
  * 取得站點的顯示名稱（customName 優先於 autoName）
@@ -157,7 +166,8 @@ function drawStationMarker(
 ): void {
   if (scale <= 0.01) return
   const theme = DEFAULT_VISUAL_THEME.stationMarker
-  const baseRadius = theme.radiusPx * scale
+  const ui = uiScaleFor(ctx.canvas.width, ctx.canvas.height)
+  const baseRadius = theme.radiusPx * scale * ui
 
   ctx.save()
   if (isHighlighted) {
@@ -172,7 +182,7 @@ function drawStationMarker(
   ctx.arc(x, y, baseRadius, 0, Math.PI * 2)
   ctx.fillStyle = isHighlighted ? theme.ActiveFillColor : theme.fillColor
   ctx.fill()
-  ctx.lineWidth = theme.strokeWidth * scale
+  ctx.lineWidth = theme.strokeWidth * scale * ui
   ctx.strokeStyle = theme.strokeColor
   ctx.stroke()
   ctx.restore()
@@ -188,30 +198,35 @@ function drawPlaceBubble(
   text: string,
   scale: number,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  anchorOffsetPx = 0
 ): void {
   if (!text || scale <= 0.05) return
   const theme = DEFAULT_VISUAL_THEME.placeBubble
-  const fontScale = Math.max(0.65, Math.min(canvasWidth, canvasHeight) / 1080)
-  const fontSize = Math.round(26 * fontScale * scale)
+  const fontScale = uiScaleFor(canvasWidth, canvasHeight)
+  const fontSize = Math.round(40 * fontScale * scale)
 
   ctx.save()
-  ctx.font = `600 ${fontSize}px ${DEFAULT_VISUAL_THEME.fontFamily}`
-  const padX = theme.paddingX * fontScale * scale
-  const padY = theme.paddingY * fontScale * scale
-  const label = fitTextToWidth(ctx, text, canvasWidth * 0.7)
+  ctx.font = `700 ${fontSize}px ${DEFAULT_VISUAL_THEME.fontFamily}`
+  const padX = fontSize * 0.6
+  const padY = fontSize * 0.36
+  const label = fitTextToWidth(ctx, text, canvasWidth * 0.8)
   const boxW = ctx.measureText(label).width + padX * 2
   const boxH = fontSize + padY * 2
 
   const margin = 16 * fontScale
+  // 氣泡底部與標記之間的距離：至少 30px，若標記較大（大頭照）則再往上讓
+  const gap = Math.max(30 * fontScale, anchorOffsetPx + 12 * fontScale)
   const boxX = Math.max(margin, Math.min(canvasWidth - boxW - margin, x - boxW / 2))
-  const boxY = Math.max(margin, y - 26 * fontScale - boxH)
+  // 上方空間不夠時改放到標記下方，避免氣泡壓住移動標記
+  const aboveY = y - gap - boxH
+  const boxY = aboveY >= margin ? aboveY : Math.min(canvasHeight - boxH - margin, y + gap)
 
   ctx.shadowColor = theme.shadowColor
   ctx.shadowBlur = 16
   ctx.shadowOffsetY = 4
 
-  drawRoundedRect(ctx, boxX, boxY, boxW, boxH, theme.borderRadiusPx * scale)
+  drawRoundedRect(ctx, boxX, boxY, boxW, boxH, Math.max(theme.borderRadiusPx * fontScale, fontSize * 0.45))
   ctx.fillStyle = theme.backgroundColor
   ctx.fill()
 
@@ -284,8 +299,8 @@ function drawMapAttribution(
   height: number,
   alpha = 1
 ): void {
-  const scale = Math.max(0.65, Math.min(width, height) / 1080)
-  const fontSize = Math.round(15 * scale)
+  const scale = uiScaleFor(width, height)
+  const fontSize = Math.round(18 * scale)
   ctx.save()
   ctx.globalAlpha = alpha * 0.85
   ctx.font = `500 ${fontSize}px ${DEFAULT_VISUAL_THEME.fontFamily}`
@@ -312,6 +327,31 @@ export class FramePainter {
   private blurredCache = new Map<string, HTMLCanvasElement>()
   private outgoingSnapshot: { timeline: Segment[]; index: number; width: number; height: number; canvas: HTMLCanvasElement } | null = null
   private mapBlurCanvas: HTMLCanvasElement | null = null
+  private avatarCache: { blob: Blob; bitmap: ImageBitmap | null; pending: Promise<ImageBitmap | null> } | null = null
+
+  /**
+   * 取得移動標記用的大頭照（同一個 Blob 只解碼一次）
+   */
+  private async getAvatarBitmap(blob: Blob | undefined): Promise<ImageBitmap | null> {
+    if (!blob) return null
+    if (this.avatarCache?.blob === blob) {
+      return this.avatarCache.bitmap ?? this.avatarCache.pending
+    }
+    this.avatarCache?.bitmap?.close()
+    const entry: { blob: Blob; bitmap: ImageBitmap | null; pending: Promise<ImageBitmap | null> } = {
+      blob,
+      bitmap: null,
+      pending: Promise.resolve(null)
+    }
+    entry.pending = createImageBitmap(blob)
+      .then((bmp) => {
+        entry.bitmap = bmp
+        return bmp
+      })
+      .catch(() => null)
+    this.avatarCache = entry
+    return entry.pending
+  }
 
   /**
    * 取得單張照片的 ImageBitmap（LRU 快取）
@@ -465,6 +505,8 @@ export class FramePainter {
       bmp.close()
     }
     this.bitmapCache.clear()
+    this.avatarCache?.bitmap?.close()
+    this.avatarCache = null
     this.blurredCache.clear()
     this.outgoingSnapshot = null
     this.mapBlurCanvas = null
@@ -668,7 +710,7 @@ export class FramePainter {
     ctx.shadowColor = 'rgba(0, 0, 0, 0.65)'
     ctx.shadowBlur = 18
 
-    const titleSize = Math.round(64 * scale)
+    const titleSize = Math.round(72 * scale)
     ctx.font = `700 ${titleSize}px ${DEFAULT_VISUAL_THEME.fontFamily}`
     ctx.fillStyle = DEFAULT_VISUAL_THEME.typography.primaryTextColor
     ctx.fillText(
@@ -678,10 +720,10 @@ export class FramePainter {
     )
 
     if (dateRangeStr) {
-      const dateSize = Math.round(30 * scale)
+      const dateSize = Math.round(36 * scale)
       ctx.font = `500 ${dateSize}px ${DEFAULT_VISUAL_THEME.fontFamily}`
       ctx.fillStyle = DEFAULT_VISUAL_THEME.typography.secondaryTextColor
-      ctx.fillText(dateRangeStr, width / 2, height / 2 + 46 * scale)
+      ctx.fillText(dateRangeStr, width / 2, height / 2 + 54 * scale)
     }
     ctx.restore()
   }
@@ -796,7 +838,7 @@ export class FramePainter {
     const scale = Math.max(0.65, Math.min(width, height) / 1080)
     const padLeft = Math.round(56 * scale)
     const maxTextWidth = width - padLeft * 2
-    let cursorBottomY = height - Math.round(48 * scale)
+    let cursorBottomY = height - Math.round(52 * scale)
 
     ctx.save()
     ctx.globalAlpha = alpha
@@ -806,20 +848,20 @@ export class FramePainter {
     ctx.shadowBlur = 12
 
     if (text.line3Note) {
-      ctx.font = `400 ${Math.round(26 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
+      ctx.font = `500 ${Math.round(34 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
       ctx.fillStyle = DEFAULT_VISUAL_THEME.typography.secondaryTextColor
       ctx.fillText(fitTextToWidth(ctx, text.line3Note, maxTextWidth), padLeft, cursorBottomY)
-      cursorBottomY -= Math.round(40 * scale)
+      cursorBottomY -= Math.round(50 * scale)
     }
 
     if (text.line2Date) {
-      ctx.font = `500 ${Math.round(28 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
+      ctx.font = `600 ${Math.round(34 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
       ctx.fillStyle = DEFAULT_VISUAL_THEME.typography.accentTextColor
       ctx.fillText(text.line2Date, padLeft, cursorBottomY)
-      cursorBottomY -= Math.round(46 * scale)
+      cursorBottomY -= Math.round(58 * scale)
     }
 
-    ctx.font = `700 ${Math.round(46 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
+    ctx.font = `700 ${Math.round(54 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
     ctx.fillStyle = DEFAULT_VISUAL_THEME.typography.primaryTextColor
     ctx.fillText(fitTextToWidth(ctx, text.line1Title, maxTextWidth), padLeft, cursorBottomY)
     ctx.restore()
@@ -903,7 +945,7 @@ export class FramePainter {
 
     if (!fromStation || !toStation) return
 
-    const moveState = evaluateMoveSegmentAt(fromStation, toStation, t, { width, height })
+    const moveState = evaluateMoveSegmentAt(fromStation, toStation, t, { width, height }, segment.route)
     mapRenderer.setCamera(moveState.camera)
 
     // 此移動段之前已完成的路線 + 當前截取路線
@@ -924,22 +966,39 @@ export class FramePainter {
       height
     )
 
-    // 起點標記與氣泡
+    // 起點與終點標記（終點在 2.8–3.5s 回彈彈出）
     const fromPt = mapRenderer.project(fromStation.center)
     drawStationMarker(ctx, fromPt.x, fromPt.y, 1, moveState.showOriginBubble, t * 3)
-    if (moveState.showOriginBubble) {
-      drawPlaceBubble(ctx, fromPt.x, fromPt.y, getStationDisplayName(fromStation), 1, width, height)
-    }
-
-    // 終點標記與氣泡（2.8–3.5s 回彈動效）
     const toPt = mapRenderer.project(toStation.center)
     if (moveState.destinationMarkerScale > 0) {
       drawStationMarker(ctx, toPt.x, toPt.y, moveState.destinationMarkerScale, true, t * 4)
     }
 
+    // 移動標記：位於路線前端，出發前停在起點、抵達後停在終點
+    const ui = uiScaleFor(width, height)
+    const markerStyle = journey.settings.travelerMarker ?? 'dot'
+    const avatar = markerStyle === 'avatar' ? await this.getAvatarBitmap(journey.travelerAvatar) : null
+    const headCoord = activeRouteSlice.length > 0 ? activeRouteSlice[activeRouteSlice.length - 1] : null
+    const headPt = (headCoord ? mapRenderer.projectRoute([headCoord])[0] : undefined) ?? fromPt
+    drawTravelerMarker(ctx, headPt.x, headPt.y, markerStyle, ui, t * 5.6, avatar)
+    const travelerOffset = travelerMarkerRadius(markerStyle === 'avatar' && !avatar ? 'person' : markerStyle, ui)
+
+    // 地名氣泡畫在最上層。移動標記在站點附近時（道路起訖點會吸附到最近的路，與站點中心差幾十公尺），
+    // 氣泡改以移動標記為錨點並讓出它的高度，避免壓住大頭照
+    const bubbleAnchor = (stationPt: { x: number; y: number }) =>
+      Math.hypot(headPt.x - stationPt.x, headPt.y - stationPt.y) < travelerOffset * 3
+        ? { x: headPt.x, y: Math.min(headPt.y, stationPt.y), offset: travelerOffset }
+        : { x: stationPt.x, y: stationPt.y, offset: 0 }
+
+    if (moveState.showOriginBubble) {
+      const anchor = bubbleAnchor(fromPt)
+      drawPlaceBubble(ctx, anchor.x, anchor.y, getStationDisplayName(fromStation), 1, width, height, anchor.offset)
+    }
+
     if (moveState.showDestinationBubble) {
       const appear = Math.min(1, moveState.destinationMarkerScale)
-      drawPlaceBubble(ctx, toPt.x, toPt.y, getStationDisplayName(toStation), appear, width, height)
+      const anchor = bubbleAnchor(toPt)
+      drawPlaceBubble(ctx, anchor.x, anchor.y, getStationDisplayName(toStation), appear, width, height, anchor.offset)
 
       // 底部字幕：「前往 [目的站點名稱]」＋目的站點的抵達日期 (§2.2)
       drawBottomGradientMask(ctx, width, height)
@@ -956,18 +1015,18 @@ export class FramePainter {
       ctx.shadowColor = 'rgba(0, 0, 0, 0.7)'
       ctx.shadowBlur = 12
 
-      ctx.font = `700 ${Math.round(42 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
+      ctx.font = `700 ${Math.round(52 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
       ctx.fillStyle = DEFAULT_VISUAL_THEME.typography.primaryTextColor
       ctx.fillText(
         fitTextToWidth(ctx, `前往 ${getStationDisplayName(toStation)}`, width * 0.9),
         width / 2,
-        height - Math.round(84 * scale)
+        height - Math.round(104 * scale)
       )
 
       if (arrivalDateStr) {
-        ctx.font = `500 ${Math.round(27 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
+        ctx.font = `600 ${Math.round(34 * scale)}px ${DEFAULT_VISUAL_THEME.fontFamily}`
         ctx.fillStyle = DEFAULT_VISUAL_THEME.typography.accentTextColor
-        ctx.fillText(arrivalDateStr, width / 2, height - Math.round(42 * scale))
+        ctx.fillText(arrivalDateStr, width / 2, height - Math.round(52 * scale))
       }
       ctx.restore()
     }

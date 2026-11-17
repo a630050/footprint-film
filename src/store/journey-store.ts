@@ -75,6 +75,8 @@ interface JourneyStoreState {
   // 設定與重新分站
   updateJourneyTitle: (title: string) => void
   updateSettings: (partial: Partial<JourneySettings>) => void
+  /** 設定（或清除）移動標記用的圓形大頭照；設定時一併把移動標記切換為大頭照 */
+  setTravelerAvatar: (avatar: Blob | undefined) => void
   reclusterWithRadius: (newRadiusKm: number) => void
 
   // 非同步背景任務：查詢站點地名與陸路路線
@@ -595,6 +597,20 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
     if (partial.longDistanceThresholdKm !== undefined) {
       void get().refreshStationNamesAndRoutes()
     }
+  },
+
+  setTravelerAvatar: (avatar) => {
+    const { journey } = get()
+    const nextJourney: Journey = {
+      ...journey,
+      travelerAvatar: avatar,
+      settings: {
+        ...journey.settings,
+        travelerMarker: avatar ? 'avatar' : journey.settings.travelerMarker === 'avatar' ? 'dot' : journey.settings.travelerMarker
+      }
+    }
+    set({ journey: nextJourney })
+    void saveJourneyDraft(nextJourney)
   },
 
   reclusterWithRadius: (newRadiusKm) => {
