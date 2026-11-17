@@ -187,9 +187,9 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
         aria-modal="true"
         aria-label="頁面設定"
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:rounded-2xl"
+        className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:rounded-2xl"
       >
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-2.5">
           <div>
             <h2 className="text-base font-bold text-white">頁面設定</h2>
             <p className="text-xs text-slate-400">
@@ -206,18 +206,23 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
           </button>
         </div>
 
-        <div className="space-y-4 overflow-y-auto p-5">
-          <div className="flex justify-center rounded-xl bg-slate-950 p-2">
-            <canvas
-              ref={canvasRef}
-              width={previewDims.width}
-              height={previewDims.height}
-              className={landscape ? 'aspect-video max-h-[34vh] w-auto max-w-full rounded-lg' : 'aspect-[9/16] h-[34vh] w-auto rounded-lg'}
-            />
-          </div>
+        {/* 寬螢幕：左欄預覽＋拼接樣式、右欄運鏡，整個視窗不需捲動；手機改為上下排列 */}
+        <div className="grid gap-4 overflow-y-auto p-4 md:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] md:gap-6 md:p-5">
+          <div className="space-y-4">
+            <div className="flex justify-center rounded-xl bg-slate-950 p-2">
+              <canvas
+                ref={canvasRef}
+                width={previewDims.width}
+                height={previewDims.height}
+                className={
+                  landscape
+                    ? 'aspect-video max-h-[36vh] w-auto max-w-full rounded-lg'
+                    : 'aspect-[9/16] h-[36vh] w-auto rounded-lg'
+                }
+              />
+            </div>
 
-          <div className="grid gap-5 md:grid-cols-2">
-            {/* 左：拼接樣式 */}
+            {/* 拼接樣式 */}
             <section className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-200">拼接樣式</h3>
@@ -232,7 +237,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                   <span>自動{isLayoutAuto ? `（${PAGE_LAYOUT_LABELS[resolved.layout]}）` : ''}</span>
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {layouts.map((layout) => {
                   const selected = !isLayoutAuto && page.layout === layout
                   const effective = resolved.layout === layout
@@ -242,7 +247,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                       type="button"
                       onClick={() => apply({ layout })}
                       aria-pressed={selected}
-                      className={`flex flex-col items-center gap-1 rounded-xl border px-1 py-2 text-[11px] font-semibold transition ${
+                      className={`flex flex-col items-center gap-0.5 rounded-xl border px-1 py-1.5 text-[11px] font-semibold transition ${
                         selected
                           ? 'border-amber-500 bg-amber-500/10 text-amber-200'
                           : effective
@@ -258,9 +263,10 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
               </div>
               {count === 1 && <p className="text-xs text-slate-500">在編輯區點兩張照片之間的空隙，可以把照片合成同一頁。</p>}
             </section>
+          </div>
 
-            {/* 右：運鏡（米字控制盤） */}
-            <section className="space-y-2">
+          {/* 右欄：運鏡（米字控制盤） */}
+          <section className="space-y-2 md:pt-1">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-200">鏡頭移動</h3>
                 <button
@@ -284,7 +290,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                           type="button"
                           onClick={setZoom}
                           title="點擊切換：漸進 → 漸遠 → 不動"
-                          className={`flex h-14 w-14 flex-col items-center justify-center rounded-full border-2 text-[11px] font-bold transition ${zoomStyles[currentMotion.zoom]} ${
+                          className={`flex h-12 w-12 flex-col items-center justify-center rounded-full border-2 text-[11px] font-bold transition ${zoomStyles[currentMotion.zoom]} ${
                             isMotionAuto ? 'opacity-60' : ''
                           }`}
                         >
@@ -302,7 +308,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                         aria-label={DIRECTION_LABELS[cell]}
                         aria-pressed={active}
                         onClick={() => setDirection(cell)}
-                        className={`flex h-14 w-14 items-center justify-center rounded-xl border transition ${
+                        className={`flex h-12 w-12 items-center justify-center rounded-xl border transition ${
                           active
                             ? `border-amber-500 bg-amber-500/20 text-amber-300 ${isMotionAuto ? 'opacity-60' : ''}`
                             : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:border-slate-500 hover:text-slate-200'
@@ -313,19 +319,18 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                     )
                   })}
                 </div>
-                <p className="text-center text-xs text-slate-400">
-                  中間圓點：<span className="font-semibold text-amber-300">黃＝漸進</span>、
-                  <span className="font-semibold text-rose-400">紅＝漸遠</span>、
-                  <span className="font-semibold text-slate-300">灰＝不動</span>
+                <p className="text-center text-[11px] leading-relaxed text-slate-400">
+                  圓點切換 <span className="font-semibold text-amber-300">黃漸進</span>・
+                  <span className="font-semibold text-rose-400">紅漸遠</span>・
+                  <span className="font-semibold text-slate-300">灰不動</span>
                   <br />
-                  箭頭：鏡頭往該方向移動，可以和縮放一起使用
+                  箭頭＝鏡頭平移方向，可與縮放並用
                 </p>
               </div>
             </section>
-          </div>
         </div>
 
-        <div className="flex justify-end border-t border-slate-800 px-5 py-3">
+        <div className="flex justify-end border-t border-slate-800 px-5 py-2.5">
           <button
             type="button"
             onClick={onClose}
