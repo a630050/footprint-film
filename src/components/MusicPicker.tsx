@@ -108,7 +108,7 @@ export function MusicPicker() {
                 type="button"
                 onClick={() => toggleAudition(track.id)}
                 aria-label={auditionId === track.id ? '停止試聽' : '試聽'}
-                className="relative mt-1 inline-flex w-fit items-center gap-1 rounded-lg bg-slate-900/80 px-2 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
+                className="relative mt-1 inline-flex min-h-8 w-fit items-center gap-1 rounded-lg bg-slate-900/80 px-2.5 py-1.5 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
               >
                 {auditionId === track.id ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
                 {auditionId === track.id ? '停止' : '試聽'}

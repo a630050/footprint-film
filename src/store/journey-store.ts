@@ -16,6 +16,13 @@ import {
 import { hasCachedReverseGeocode, reverseGeocodeStationCenter } from '../services/geocoding'
 import { fetchGroundRouteWithFallback } from '../services/routing'
 import { resolveStationPages } from '../domain/pages'
+import {
+  createEmptyHistory,
+  type JourneyHistory,
+  recordHistory,
+  redoHistory,
+  undoHistory
+} from './history'
 import type {
   Coordinates,
   Journey,
@@ -58,6 +65,14 @@ interface JourneyStoreState {
   draftChecked: boolean
   /** 最近一次刪除的照片（提供「復原」） */
   lastDeletedPhoto: DeletedPhotoUndo | null
+  /** 編輯紀錄（Ctrl+Z 復原、Ctrl+Shift+Z 重做） */
+  history: JourneyHistory
+  /** 最近一次復原／重做的提示 */
+  historyNotice: { kind: 'undo' | 'redo'; at: number } | null
+  /** 復原上一步編輯 */
+  undo: () => void
+  /** 重做剛才復原的編輯 */
+  redo: () => void
 
   // 步驟與草稿管理
   setCurrentStep: (step: AppStep) => void
@@ -161,7 +176,60 @@ function isSameCoordinates(a: Coordinates, b: Coordinates): boolean {
  */
 let refreshGeneration = 0
 
-export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
+type StoreSet = (partial: Partial<JourneyStoreState>) => void
+type AnyAction = (...args: never[]) => unknown
+
+/**
+ * 會改動旅程內容的使用者操作：執行前先記下旅程，供 Ctrl+Z 復原。
+ * 值是「可合併的編輯種類」：同一欄位連續打字只算一步；null 表示每次都是獨立的一步。
+ * 背景查詢地名、路線等自動更新不在此列，不會被記成一步
+ */
+const HISTORY_ACTIONS: Partial<Record<keyof JourneyStoreState, ((...args: never[]) => string) | null>> = {
+  appendUploadedPhotos: null,
+  renameStation: ((id: string) => `rename:${id}`) as (...args: never[]) => string,
+  updateStationNote: ((id: string) => `stationNote:${id}`) as (...args: never[]) => string,
+  mergeWithNextStation: null,
+  splitStationAtPhoto: null,
+  deleteStation: null,
+  togglePhotoIncluded: null,
+  updatePhotoNote: ((id: string) => `photoNote:${id}`) as (...args: never[]) => string,
+  deletePhoto: null,
+  undoDeletePhoto: null,
+  updateStationPages: null,
+  setCoverPhoto: null,
+  reorderPhotoInStation: null,
+  movePhotoToStation: null,
+  createManualStationWithPhotos: null,
+  assignManualLocationToPhotos: null,
+  updateJourneyTitle: (() => 'title') as (...args: never[]) => string,
+  updateSettings: ((partial: Partial<JourneySettings>) => `settings:${Object.keys(partial).sort().join(',')}`) as (
+    ...args: never[]
+  ) => string,
+  setTravelerAvatar: null,
+  setCustomMusic: null,
+  reclusterWithRadius: null
+}
+
+/** 把上列操作包上「記錄編輯前狀態」的外層 */
+function withUndoHistory(set: StoreSet, get: () => JourneyStoreState, state: JourneyStoreState): JourneyStoreState {
+  const wrapped = { ...state } as Record<string, unknown>
+  for (const [name, keyOf] of Object.entries(HISTORY_ACTIONS)) {
+    const original = state[name as keyof JourneyStoreState] as unknown as AnyAction
+    wrapped[name] = (...args: never[]) => {
+      const before = get().journey
+      const result = original(...args)
+      const after = get().journey
+      // 還沒有任何照片時（第一次選照片）不記錄，避免復原到空白旅程
+      if (after !== before && Object.keys(before.photos).length > 0) {
+        set({ history: recordHistory(get().history, before, keyOf ? keyOf(...args) : null, Date.now()) })
+      }
+      return result
+    }
+  }
+  return wrapped as unknown as JourneyStoreState
+}
+
+export const useJourneyStore = create<JourneyStoreState>((set, get) => withUndoHistory(set, get, {
   currentStep: 1,
   journey: createEmptyJourney(),
   groundRoutes: {},
@@ -169,6 +237,37 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
   pendingDraft: null,
   draftChecked: false,
   lastDeletedPhoto: null,
+  history: createEmptyHistory(),
+  historyNotice: null,
+
+  undo: () => {
+    const { history, journey } = get()
+    const result = undoHistory(history, journey)
+    if (!result) return
+    set({
+      journey: result.journey,
+      history: result.history,
+      lastDeletedPhoto: null,
+      historyNotice: { kind: 'undo', at: Date.now() }
+    })
+    void saveJourneyDraft(result.journey)
+    // 復原後站點組合可能不同，補查地名與陸路路線（已查過的會直接用快取）
+    void get().refreshStationNamesAndRoutes()
+  },
+
+  redo: () => {
+    const { history, journey } = get()
+    const result = redoHistory(history, journey)
+    if (!result) return
+    set({
+      journey: result.journey,
+      history: result.history,
+      lastDeletedPhoto: null,
+      historyNotice: { kind: 'redo', at: Date.now() }
+    })
+    void saveJourneyDraft(result.journey)
+    void get().refreshStationNamesAndRoutes()
+  },
 
   setCurrentStep: (step) => set({ currentStep: step }),
 
@@ -188,7 +287,8 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
     set({
       journey: pendingDraft,
       pendingDraft: null,
-      currentStep: 2
+      currentStep: 2,
+      history: createEmptyHistory()
     })
     void get().refreshStationNamesAndRoutes()
   },
@@ -199,7 +299,8 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => ({
       journey: createEmptyJourney(),
       pendingDraft: null,
       groundRoutes: {},
-      currentStep: 1
+      currentStep: 1,
+      history: createEmptyHistory()
     })
   },
 

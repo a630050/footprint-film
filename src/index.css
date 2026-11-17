@@ -1,2 +1,8 @@
 @import "tailwindcss";
 @import "maplibre-gl/dist/maplibre-gl.css";
+
+/* 滑桿加高點擊範圍，手機上手指比較好拖 */
+input[type='range'] {
+  min-height: 2rem;
+  touch-action: pan-y;
+}

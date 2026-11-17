@@ -315,7 +315,8 @@ export function PreviewPlayer() {
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* 手機：時間軸獨佔一列、按鈕在下一列；寬螢幕排成一列 */}
+      <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:gap-3">
         <button
           type="button"
           aria-label={isPlaying ? '暫停' : '播放'}
@@ -353,10 +354,10 @@ export function PreviewPlayer() {
             setIsPlaying(false)
             seekTo(Number(e.target.value))
           }}
-          className="flex-1 accent-amber-500"
+          className="order-first min-w-0 basis-full accent-amber-500 sm:order-none sm:flex-1 sm:basis-auto"
         />
 
-        <span className="w-24 text-right font-mono text-xs text-slate-300">
+        <span className="ml-auto shrink-0 text-right font-mono text-xs text-slate-300 sm:ml-0 sm:w-24">
           {formatMmSs(displayTimeMs)} / {formatMmSs(totalDurationMs)}
         </span>
 

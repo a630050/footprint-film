@@ -71,7 +71,7 @@ function CreditList({ title, entries }: { title: string; entries: CreditEntry[] 
                 href={entry.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-semibold text-slate-100 underline decoration-slate-600 underline-offset-2 hover:decoration-amber-400"
+                className="inline-block py-1 font-semibold text-slate-100 underline decoration-slate-600 underline-offset-2 hover:decoration-amber-400"
               >
                 {entry.name}
               </a>
@@ -110,7 +110,7 @@ export function CreditsFooter() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="text-sm text-slate-400 underline-offset-4 transition hover:text-amber-300 hover:underline"
+        className="rounded-lg px-3 py-2 text-sm text-slate-400 underline-offset-4 transition hover:text-amber-300 hover:underline"
       >
         程式設計：徐承佑
       </button>

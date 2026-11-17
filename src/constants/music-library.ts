@@ -20,21 +20,21 @@ export interface BuiltinTrack {
 export const BUILTIN_TRACKS: BuiltinTrack[] = [
   {
     id: 'acoustic',
-    style: '輕快木吉他',
-    title: 'Exploration',
-    author: 'johnclark',
-    durationSec: 21,
-    file: 'music/acoustic-exploration.m4a',
-    sourceUrl: 'https://opengameart.org/content/exploration-0'
+    style: '溫暖木吉他',
+    title: 'Sunset Plains',
+    author: 'Yoiyami',
+    durationSec: 330,
+    file: 'music/acoustic-sunset-plains.m4a',
+    sourceUrl: 'https://opengameart.org/content/sunset-plains'
   },
   {
     id: 'piano',
     style: '溫馨鋼琴',
-    title: 'Bright Eyes',
-    author: 'tomcat',
-    durationSec: 66,
-    file: 'music/piano-bright-eyes.m4a',
-    sourceUrl: 'https://opengameart.org/content/bright-eyes'
+    title: 'Piano Emotional Solo 139',
+    author: 'Tozan',
+    durationSec: 205,
+    file: 'music/piano-emotional-solo-139.m4a',
+    sourceUrl: 'https://opengameart.org/content/piano-emotional-solo-139'
   },
   {
     id: 'lofi',

@@ -8,6 +8,7 @@ import { DeletedPhotoToast } from './components/DeletedPhotoToast'
 import { MusicPicker } from './components/MusicPicker'
 import { PreviewPlayer } from './components/PreviewPlayer'
 import { TravelerMarkerPicker } from './components/TravelerMarkerPicker'
+import { HistoryToast, UndoRedoButtons, useUndoShortcuts } from './components/UndoControls'
 import { isWebCodecsSupported } from './services/browser-support'
 import { useJourneyStore } from './store/journey-store'
 
@@ -32,6 +33,7 @@ export function App() {
   )
 
   const [supportedBrowser, setSupportedBrowser] = useState(true)
+  useUndoShortcuts()
 
   useEffect(() => {
     setSupportedBrowser(isWebCodecsSupported())
@@ -77,12 +79,18 @@ export function App() {
             </div>
           </div>
 
-          {/* 三步驟切換列 */}
-          <nav className="flex items-center gap-1.5 text-xs font-semibold">
+          {/* 三步驟切換列＋復原／重做 */}
+          <nav className="flex items-center gap-1 text-xs font-semibold sm:gap-1.5">
+            {hasPhotos && (
+              <>
+                <UndoRedoButtons />
+                <span className="hidden text-slate-700 sm:inline">|</span>
+              </>
+            )}
             <button
               type="button"
               onClick={() => setCurrentStep(1)}
-              className={`rounded-xl px-3 py-1.5 transition ${
+              className={`whitespace-nowrap rounded-xl px-2 py-2 transition sm:px-3 sm:py-1.5 ${
                 currentStep === 1
                   ? 'bg-amber-500 text-slate-950'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
@@ -90,12 +98,12 @@ export function App() {
             >
               ① 選照片
             </button>
-            <span className="text-slate-700">/</span>
+            <span className="hidden text-slate-700 sm:inline">/</span>
             <button
               type="button"
               disabled={!hasPhotos}
               onClick={() => setCurrentStep(2)}
-              className={`rounded-xl px-3 py-1.5 transition ${
+              className={`whitespace-nowrap rounded-xl px-2 py-2 transition sm:px-3 sm:py-1.5 ${
                 currentStep === 2
                   ? 'bg-amber-500 text-slate-950'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40'
@@ -103,12 +111,12 @@ export function App() {
             >
               ② 編輯旅程
             </button>
-            <span className="text-slate-700">/</span>
+            <span className="hidden text-slate-700 sm:inline">/</span>
             <button
               type="button"
               disabled={!hasPhotos}
               onClick={() => setCurrentStep(3)}
-              className={`rounded-xl px-3 py-1.5 transition ${
+              className={`whitespace-nowrap rounded-xl px-2 py-2 transition sm:px-3 sm:py-1.5 ${
                 currentStep === 3
                   ? 'bg-amber-500 text-slate-950'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40'
@@ -171,6 +179,7 @@ export function App() {
 
       <CreditsFooter />
       <DeletedPhotoToast />
+      <HistoryToast />
     </div>
   )
 }

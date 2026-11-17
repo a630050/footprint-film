@@ -5,7 +5,7 @@ import {
   type DragStartEvent,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   useSensor,
   useSensors
@@ -101,7 +101,7 @@ function SortablePhotoThumb({ photo, isCover, isSelected, onSelect, onDelete }: 
       {...attributes}
       {...listeners}
       onClick={onSelect}
-      className={`group relative h-24 w-24 shrink-0 cursor-grab touch-manipulation overflow-hidden rounded-xl border-2 transition-colors active:cursor-grabbing ${
+      className={`group relative h-24 w-24 shrink-0 cursor-grab touch-manipulation select-none overflow-hidden rounded-xl border-2 transition-colors [-webkit-touch-callout:none] active:cursor-grabbing ${
         isDragging ? 'z-10 opacity-30' : ''
       } ${
         isSelected
@@ -122,11 +122,15 @@ function SortablePhotoThumb({ photo, isCover, isSelected, onSelect, onDelete }: 
           e.stopPropagation()
           togglePhotoIncluded(photo.id)
         }}
-        className={`absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-md border text-xs transition ${
-          photo.included ? 'border-amber-400 bg-amber-500 text-slate-950' : 'border-white/50 bg-black/60 text-transparent'
-        }`}
+        className="absolute left-0 top-0 flex h-9 w-9 items-start justify-start p-1.5"
       >
-        <Check className="h-3.5 w-3.5 stroke-[3]" />
+        <span
+          className={`flex h-5 w-5 items-center justify-center rounded-md border text-xs transition ${
+            photo.included ? 'border-amber-400 bg-amber-500 text-slate-950' : 'border-white/50 bg-black/60 text-transparent'
+          }`}
+        >
+          <Check className="h-3.5 w-3.5 stroke-[3]" />
+        </span>
       </button>
 
       {/* 刪除：滑鼠移過去才出現；觸控裝置選取後出現 */}
@@ -139,7 +143,7 @@ function SortablePhotoThumb({ photo, isCover, isSelected, onSelect, onDelete }: 
           e.stopPropagation()
           onDelete()
         }}
-        className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-rose-500 focus:opacity-100 ${
+        className={`absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-rose-500 focus:opacity-100 ${
           isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 [@media(hover:none)]:hidden'
         }`}
       >
@@ -158,7 +162,9 @@ function PageGapToggle({ isBreak, onToggle }: { isBreak: boolean; onToggle: () =
       onClick={onToggle}
       title={isBreak ? '點擊取消分隔線（與前一頁合併）' : '點擊加上分隔線（從這裡分成新的一頁）'}
       aria-label={isBreak ? '取消分隔線' : '加上分隔線'}
-      className={`group/gap flex h-24 shrink-0 items-center justify-center transition ${isBreak ? 'w-6' : 'w-3'}`}
+      className={`group/gap flex h-24 shrink-0 items-center justify-center transition ${
+        isBreak ? 'w-6 [@media(hover:none)]:w-8' : 'w-3 [@media(hover:none)]:w-7'
+      }`}
     >
       <span
         className={`block rounded-full transition ${
@@ -230,9 +236,10 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
   const selectedPhotoIndex = selectedPhotoId ? flatIds.indexOf(selectedPhotoId) : -1
   const editingIdx = editingPageId ? pages.findIndex((p) => p.id === editingPageId) : -1
 
+  // 滑鼠拖一下就開始；手機要長按 0.25 秒才開始拖曳，一般滑動仍是捲動頁面
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
@@ -399,7 +406,7 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
                       disabled={!style}
                       onClick={() => setEditingPageId(page.id)}
                       title="設定這一頁的拼接樣式與鏡頭移動"
-                      className="group/bar flex items-center gap-1.5 rounded-lg border-t-2 border-slate-700 px-1.5 pt-1 text-left text-[11px] text-slate-400 transition hover:border-amber-400 hover:text-amber-200 disabled:opacity-40"
+                      className="group/bar flex min-h-9 items-center gap-1.5 rounded-lg border-t-2 border-slate-700 px-1.5 py-1 text-left text-[11px] text-slate-400 transition hover:border-amber-400 hover:text-amber-200 disabled:opacity-40"
                     >
                       {style ? (
                         <>
@@ -523,7 +530,7 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
           <button
             type="button"
             onClick={() => mergeWithNextStation(station.id)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium text-slate-400 transition hover:bg-slate-800 hover:text-amber-300"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:bg-slate-800 hover:text-amber-300"
           >
             <GitMerge className="h-3.5 w-3.5" />
             <span>與下一站「{getStationDisplayName(nextStation)}」合併</span>

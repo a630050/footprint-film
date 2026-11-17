@@ -207,8 +207,8 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
         </div>
 
         {/* 寬螢幕：左欄預覽＋拼接樣式、右欄運鏡，整個視窗不需捲動；手機改為上下排列 */}
-        <div className="grid gap-4 overflow-y-auto p-4 md:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] md:gap-6 md:p-5">
-          <div className="space-y-4">
+        <div className="grid gap-3 overflow-y-auto p-4 md:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] md:gap-6 md:p-5">
+          <div className="space-y-3 md:space-y-4">
             <div className="flex justify-center rounded-xl bg-slate-950 p-2">
               <canvas
                 ref={canvasRef}
@@ -216,8 +216,8 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                 height={previewDims.height}
                 className={
                   landscape
-                    ? 'aspect-video max-h-[36vh] w-auto max-w-full rounded-lg'
-                    : 'aspect-[9/16] h-[36vh] w-auto rounded-lg'
+                    ? 'aspect-video max-h-[36vh] w-auto max-w-[86%] rounded-lg md:max-w-full'
+                    : 'aspect-[9/16] h-[30vh] w-auto rounded-lg md:h-[36vh]'
                 }
               />
             </div>
@@ -229,7 +229,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                 <button
                   type="button"
                   onClick={() => apply({ layout: undefined })}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
+                  className={`inline-flex min-h-8 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
                     isLayoutAuto ? 'bg-amber-500/15 text-amber-300' : 'text-slate-400 hover:bg-slate-800'
                   }`}
                 >
@@ -237,7 +237,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                   <span>自動{isLayoutAuto ? `（${PAGE_LAYOUT_LABELS[resolved.layout]}）` : ''}</span>
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
                 {layouts.map((layout) => {
                   const selected = !isLayoutAuto && page.layout === layout
                   const effective = resolved.layout === layout
@@ -272,7 +272,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                 <button
                   type="button"
                   onClick={() => apply({ motion: undefined })}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
+                  className={`inline-flex min-h-8 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
                     isMotionAuto ? 'bg-amber-500/15 text-amber-300' : 'text-slate-400 hover:bg-slate-800'
                   }`}
                 >
@@ -280,7 +280,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                   <span>自動{isMotionAuto ? `（${describeMotion(resolved.motion)}）` : ''}</span>
                 </button>
               </div>
-              <div className="flex flex-col items-center gap-3">
+              <div className="flex flex-col items-center gap-2">
                 <div className="grid grid-cols-3 gap-2">
                   {PAD.map((cell) => {
                     if (cell === 'center') {
@@ -319,12 +319,10 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
                     )
                   })}
                 </div>
-                <p className="text-center text-[11px] leading-relaxed text-slate-400">
-                  圓點切換 <span className="font-semibold text-amber-300">黃漸進</span>・
+                <p className="text-center text-[11px] text-slate-400">
+                  圓點：<span className="font-semibold text-amber-300">黃漸進</span>・
                   <span className="font-semibold text-rose-400">紅漸遠</span>・
-                  <span className="font-semibold text-slate-300">灰不動</span>
-                  <br />
-                  箭頭＝鏡頭平移方向，可與縮放並用
+                  <span className="font-semibold text-slate-300">灰不動</span>｜箭頭＝平移方向
                 </p>
               </div>
             </section>
