@@ -111,6 +111,9 @@ export function JourneyEditor() {
   const [manualStationName, setManualStationName] = useState('')
   const [targetStationForUnassigned, setTargetStationForUnassigned] = useState<string>('')
   const [highlightedStationId, setHighlightedStationId] = useState<string | null>(null)
+  // 地圖點擊只在「手動建立站點」面板開啟時才用來選座標（地圖初始化時註冊的事件透過 ref 讀取最新狀態）
+  const isPickingLocationRef = useRef(false)
+  isPickingLocationRef.current = showManualStationModal
   const [isMobileMapCollapsed, setIsMobileMapCollapsed] = useState(false)
 
   const toggleManualModalPhoto = (id: string) => {
@@ -207,6 +210,7 @@ export function JourneyEditor() {
 
     // 支援在地圖上點選位置作為手動建立站點的座標
     map.on('click', (e) => {
+      if (!isPickingLocationRef.current) return
       setPickedCoords({
         latitude: Number(e.lngLat.lat.toFixed(5)),
         longitude: Number(e.lngLat.lng.toFixed(5))
@@ -253,6 +257,11 @@ export function JourneyEditor() {
     })
     pickedMarkerRef.current = marker
   }, [pickedCoords])
+
+  // 關閉「手動建立站點」面板（取消、關閉或建立完成）時一併清除地圖上的暫時圖釘
+  useEffect(() => {
+    if (!showManualStationModal) setPickedCoords(null)
+  }, [showManualStationModal])
 
   // 手機收合地圖重新展開時通知 MapLibre 更新畫布尺寸
   useEffect(() => {

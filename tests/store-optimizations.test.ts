@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isDuplicatePhoto } from '../src/services/photo-reader'
 import { useJourneyStore } from '../src/store/journey-store'
 import type { Photo } from '../src/types/journey'
@@ -18,6 +18,23 @@ function makePhoto(overrides: Partial<Photo> & { id: string }): Photo {
     note: overrides.note
   }
 }
+
+/**
+ * store 的操作會在背景查詢地名（Nominatim）與陸路路線（OSRM）。
+ * 測試不可連到真實的公開服務（違反使用規範、結果也會受網路影響），因此以假的 fetch 攔截並一律回傳失敗，
+ * 讓背景查詢走既有的失敗處理（保留暫定名稱、改用平滑曲線路線）。
+ */
+const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  throw new Error(`測試中禁止網路請求：${String(input)}`)
+})
+
+beforeAll(() => {
+  vi.stubGlobal('fetch', fetchMock)
+})
+
+afterAll(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('journey-store 優化驗證', () => {
   beforeEach(async () => {

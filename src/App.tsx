@@ -185,11 +185,12 @@ export function App() {
         {currentStep === 2 && <JourneyEditor />}
         {currentStep === 3 && (
           <div className="mx-auto max-w-6xl px-4 py-5">
-            <div className="grid gap-5 lg:grid-cols-12 lg:items-start">
-              <div className="lg:col-span-7 lg:sticky lg:top-20">
+            {/* grid-cols-1 + min-w-0：手機單欄時欄寬不被內容（例如段落快速跳轉列）撐開 */}
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 lg:items-start">
+              <div className="min-w-0 lg:col-span-7 lg:sticky lg:top-20">
                 <PreviewPlayer />
               </div>
-              <div className="space-y-5 lg:col-span-5">
+              <div className="min-w-0 space-y-5 lg:col-span-5">
                 <ExportPanel />
                 <TravelerMarkerPicker />
                 <MusicPicker />

@@ -76,7 +76,7 @@ function formatBurstThreshold(sec: number): string {
 /**
  * 可收合的旅程設定區 (§4.3)
  * 包含：旅程標題、影片方向、分站半徑、長途門檻、每格秒數（1–4 秒，預設 2）、自動拼圖與隨機開關
- * 預設收合並顯示精簡摘要，確保手機進入步驟 ② 時首屏即可看見小地圖與站點卡片
+ * 預設展開；標題列同時顯示精簡摘要，收合後仍可一眼看到目前設定
  * 當調整分站半徑且已有手動編輯時，先跳出確認對話框
  */
 export function SettingsPanel() {
@@ -85,7 +85,8 @@ export function SettingsPanel() {
   const updateSettings = useJourneyStore((s) => s.updateSettings)
   const reclusterWithRadius = useJourneyStore((s) => s.reclusterWithRadius)
 
-  const [isOpen, setIsOpen] = useState(false)
+  // 依使用者要求預設展開，讓隨機、連拍門檻等選項一進來就看得到
+  const [isOpen, setIsOpen] = useState(true)
   const [pendingRadiusKm, setPendingRadiusKm] = useState<number | null>(null)
   const titleId = useId()
   const radiusId = useId()
