@@ -9,6 +9,8 @@ export interface Rect {
 
 /** 運鏡時最大的縮放幅度（1.0 → 1.12） */
 export const MOTION_ZOOM_AMOUNT = 0.12
+/** 縮放同時平移時，兩端額外保留的放大量（讓平移在結尾仍有移動空間） */
+export const MOTION_PAN_BASE_ZOOM = 0.04
 
 const DIRECTION_VECTORS: Record<MotionDirection, [number, number]> = {
   none: [0, 0],
@@ -163,16 +165,29 @@ export function computeMotionTransform(
   const [dx, dy] = DIRECTION_VECTORS[motion.direction]
   const hasPan = dx !== 0 || dy !== 0
 
-  let scale = 1
-  if (motion.zoom === 'in') scale = 1 + MOTION_ZOOM_AMOUNT * e
-  else if (motion.zoom === 'out') scale = 1 + MOTION_ZOOM_AMOUNT * (1 - e)
-  else if (hasPan) scale = 1 + MOTION_ZOOM_AMOUNT * 0.75
+  // 起訖縮放：純縮放從原尺寸開始／回到原尺寸；
+  // 縮放加平移時兩端都保留一點放大，結尾才有空間繼續往同方向移動（不會被拉回中心）
+  const base = hasPan ? MOTION_PAN_BASE_ZOOM : 0
+  let startScale = 1
+  let endScale = 1
+  if (motion.zoom === 'in') {
+    startScale = 1 + base
+    endScale = 1 + base + MOTION_ZOOM_AMOUNT
+  } else if (motion.zoom === 'out') {
+    startScale = 1 + base + MOTION_ZOOM_AMOUNT
+    endScale = 1 + base
+  } else if (hasPan) {
+    startScale = endScale = 1 + MOTION_ZOOM_AMOUNT * 0.75
+  }
+  const scale = startScale + (endScale - startScale) * e
 
-  const slack = (1 - 1 / scale) / 2
-  const travel = 2 * e - 1
+  // 鏡頭中心從起點邊界等速（依緩動）移到終點邊界，全程單向前進。
+  // 放大後的邊界 slack 隨縮放呈凹函數，直線內插必定落在邊界內，畫面四周不會露出空白
+  const slackOf = (s: number) => (1 - 1 / s) / 2
+  const offset = -slackOf(startScale) + (slackOf(startScale) + slackOf(endScale)) * e
   return {
     scale,
-    centerOffsetX: dx * slack * travel,
-    centerOffsetY: dy * slack * travel
+    centerOffsetX: dx * offset,
+    centerOffsetY: dy * offset
   }
 }

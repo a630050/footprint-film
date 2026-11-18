@@ -161,6 +161,33 @@ describe('page-geometry: 版面與運鏡', () => {
     }
   })
 
+  it('平移全程單向前進，不會中途折返（例如漸遠＋左上不會被拉回中心）', () => {
+    const zooms = ['in', 'out', 'none'] as const
+    const dirs = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'] as const
+    for (const zoom of zooms) {
+      for (const direction of dirs) {
+        let prevX = -Infinity
+        let prevY = -Infinity
+        const first = computeMotionTransform({ zoom, direction }, 0)
+        const last = computeMotionTransform({ zoom, direction }, 1)
+        const sx = Math.sign(last.centerOffsetX - first.centerOffsetX)
+        const sy = Math.sign(last.centerOffsetY - first.centerOffsetY)
+        for (let i = 0; i <= 40; i++) {
+          const t = computeMotionTransform({ zoom, direction }, i / 40)
+          const x = t.centerOffsetX * sx
+          const y = t.centerOffsetY * sy
+          expect(x).toBeGreaterThanOrEqual(prevX - 1e-12)
+          expect(y).toBeGreaterThanOrEqual(prevY - 1e-12)
+          prevX = x
+          prevY = y
+        }
+        // 結尾停在移動方向那一側，而不是回到正中央
+        const [ex, ey] = [last.centerOffsetX, last.centerOffsetY]
+        expect(Math.hypot(ex, ey)).toBeGreaterThan(0.01)
+      }
+    }
+  })
+
   it('漸進從原尺寸放大、漸遠從放大縮回原尺寸', () => {
     expect(computeMotionTransform({ zoom: 'in', direction: 'none' }, 0).scale).toBe(1)
     expect(computeMotionTransform({ zoom: 'in', direction: 'none' }, 1).scale).toBeCloseTo(1.12, 6)
