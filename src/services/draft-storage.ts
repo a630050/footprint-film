@@ -13,16 +13,23 @@ const DRAFT_SAVE_DEBOUNCE_MS = 600
 
 /** 草稿中的照片：影像 Blob 另存於 photo-blobs，避免每次編輯都重寫數十 MB 的影像 */
 type StoredPhoto = Omit<Photo, 'imageBlob'> & { imageBlob?: Blob }
-type StoredJourney = Omit<Journey, 'photos' | 'customMusic'> & {
+type StoredJourney = Omit<Journey, 'photos' | 'customMusic' | 'travelerAvatar'> & {
   photos: Record<string, StoredPhoto>
   /** 上傳的配樂只存檔名，音樂檔本身另存於 photo-blobs（key: CUSTOM_MUSIC_KEY） */
   customMusic?: { fileName: string; blob?: Blob }
+  /** 舊版草稿可能內嵌 travelerAvatar Blob；新版改存於 photo-blobs（key: TRAVELER_AVATAR_KEY）並以此標記 */
+  travelerAvatar?: Blob
+  hasTravelerAvatar?: boolean
 }
 
 /** 使用者上傳配樂在 photo-blobs 中的 key */
 const CUSTOM_MUSIC_KEY = 'music:custom'
+/** 使用者裁切大頭照在 photo-blobs 中的 key */
+const TRAVELER_AVATAR_KEY = 'avatar:traveler'
 /** 已寫入的配樂 Blob（同一份不重複寫入） */
 let persistedMusicBlob: Blob | null = null
+/** 已寫入的大頭照 Blob（同一份不重複寫入） */
+let persistedAvatarBlob: Blob | null = null
 
 let dbPromise: Promise<IDBPDatabase> | null = null
 
@@ -82,15 +89,26 @@ async function writeDraftNow(journey: Journey): Promise<void> {
       void blobStore.delete(CUSTOM_MUSIC_KEY)
     }
 
+    // 移動標記大頭照同樣獨立存於 photo-blobs，避免每次文字編輯重複序列化
+    const avatar = journey.travelerAvatar
+    if (avatar && avatar !== persistedAvatarBlob) {
+      void blobStore.put(avatar, TRAVELER_AVATAR_KEY)
+    } else if (!avatar && persistedAvatarBlob) {
+      void blobStore.delete(TRAVELER_AVATAR_KEY)
+    }
+
+    const { travelerAvatar: _omitAvatar, ...journeyRest } = journey
     const stored: StoredJourney = {
-      ...journey,
+      ...journeyRest,
       photos,
-      customMusic: music ? { fileName: music.fileName } : undefined
+      customMusic: music ? { fileName: music.fileName } : undefined,
+      hasTravelerAvatar: Boolean(avatar)
     }
     void tx.objectStore(DRAFT_STORE).put(stored, SINGLE_DRAFT_KEY)
     await tx.done
     for (const id of newlyWritten) persistedBlobIds.add(id)
     persistedMusicBlob = music?.blob ?? null
+    persistedAvatarBlob = avatar ?? null
   } catch {
     // 隱私模式或儲存空間不足時忽略錯誤，不中斷使用者操作
   }
@@ -158,12 +176,25 @@ export async function loadJourneyDraft(): Promise<Journey | null> {
       }
     }
 
+    let travelerAvatar: Blob | undefined = stored.travelerAvatar
+    if (!travelerAvatar && stored.hasTravelerAvatar) {
+      const blob = (await db.get(PHOTO_BLOB_STORE, TRAVELER_AVATAR_KEY)) as Blob | undefined
+      if (blob) {
+        travelerAvatar = blob
+        persistedAvatarBlob = blob
+      }
+    } else if (travelerAvatar) {
+      persistedAvatarBlob = travelerAvatar
+    }
+
     // 移除找不到影像的照片參照，避免後續渲染出錯
     const exists = (id: string) => Boolean(photos[id])
+    const { hasTravelerAvatar: _hasAvatar, ...storedJourney } = stored
     return {
-      ...stored,
+      ...storedJourney,
       photos,
       customMusic,
+      travelerAvatar,
       // 舊版草稿沒有新增的設定欄位（例如移動標記），以預設值補齊
       settings: { ...DEFAULT_JOURNEY_SETTINGS, ...stored.settings },
       stations: stored.stations
@@ -195,6 +226,7 @@ export async function clearJourneyDraft(): Promise<void> {
     await tx.done
     persistedBlobIds.clear()
     persistedMusicBlob = null
+    persistedAvatarBlob = null
   } catch {
     // 忽略清除錯誤
   }

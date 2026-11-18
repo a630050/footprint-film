@@ -1,5 +1,6 @@
 import { Loader2, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useModalDialog } from '../hooks/use-modal-dialog'
 import { decodeAndDownscaleWithHeicFallback } from '../services/photo-reader'
 
 /** 裁切框（圓形）在畫面上的直徑，CSS 像素 */
@@ -198,23 +199,22 @@ export function AvatarCropper({ file, onCancel, onSave }: AvatarCropperProps) {
     )
   }
 
-  // Esc 關閉
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
+  const dialogRef = useModalDialog(true, onCancel)
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="裁切大頭照"
+      onClick={onCancel}
     >
-      <div className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="裁切大頭照"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
+      >
         <div>
           <h2 className="text-base font-bold text-white">裁切大頭照</h2>
           <p className="mt-1 text-xs text-slate-400">拖曳移動照片位置，用滑桿、滾輪或雙指縮放，讓臉部落在圓框中間。</p>

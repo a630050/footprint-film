@@ -18,6 +18,7 @@ import { useEffect, useRef } from 'react'
 import { getVideoDimensions } from '../constants/video-config'
 import { computeTileRects } from '../domain/page-geometry'
 import { computePageDurationMs, getAvailableLayouts, PAGE_LAYOUT_LABELS } from '../domain/pages'
+import { useModalDialog } from '../hooks/use-modal-dialog'
 import { FramePainter } from '../services/frame-painter'
 import { useJourneyStore } from '../store/journey-store'
 import type { MotionDirection, MotionZoom, PageLayout, PageMotion, Photo, StationPage } from '../types/journey'
@@ -153,13 +154,7 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
     window.dispatchEvent(new Event('page-preview-restart'))
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const dialogRef = useModalDialog(true, onClose)
 
   const previewDims = getVideoDimensions(settings.orientation, '720p')
   const currentMotion = page.motion ?? resolved.motion
@@ -183,9 +178,11 @@ export function PageStyleDialog({ page, photos, resolved, onChange, onClose }: P
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="頁面設定"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:rounded-2xl"
       >

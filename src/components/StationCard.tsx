@@ -21,7 +21,9 @@ import {
   Check,
   Compass,
   GitMerge,
+  Maximize2,
   MessageSquare,
+  RotateCcw,
   Scissors,
   Settings2,
   Star,
@@ -44,6 +46,7 @@ import { getStationDisplayName } from '../services/frame-painter'
 import { useJourneyStore } from '../store/journey-store'
 import type { PageLayout, PageMotion, Photo, Station, StationPage } from '../types/journey'
 import { describeMotion, LayoutIcon, PageStyleDialog } from './PageStyleDialog'
+import { PhotoLightboxModal } from './PhotoLightboxModal'
 
 /* ───────────── 縮圖 ───────────── */
 
@@ -52,6 +55,7 @@ interface PhotoThumbProps {
   isCover: boolean
   isSelected: boolean
   onSelect: () => void
+  onDoubleClick: () => void
   onDelete: () => void
 }
 
@@ -90,7 +94,7 @@ function PhotoThumbContent({ photo, isCover }: { photo: Photo; isCover: boolean 
   )
 }
 
-function SortablePhotoThumb({ photo, isCover, isSelected, onSelect, onDelete }: PhotoThumbProps) {
+function SortablePhotoThumb({ photo, isCover, isSelected, onSelect, onDoubleClick, onDelete }: PhotoThumbProps) {
   const togglePhotoIncluded = useJourneyStore((s) => s.togglePhotoIncluded)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: photo.id })
 
@@ -101,6 +105,7 @@ function SortablePhotoThumb({ photo, isCover, isSelected, onSelect, onDelete }: 
       {...attributes}
       {...listeners}
       onClick={onSelect}
+      onDoubleClick={onDoubleClick}
       className={`group relative h-24 w-24 shrink-0 cursor-grab touch-manipulation select-none overflow-hidden rounded-xl border-2 transition-colors [-webkit-touch-callout:none] active:cursor-grabbing ${
         isDragging ? 'z-10 opacity-30' : ''
       } ${
@@ -170,7 +175,7 @@ function PageGapToggle({ isBreak, onToggle }: { isBreak: boolean; onToggle: () =
         className={`block rounded-full transition ${
           isBreak
             ? 'h-20 w-1 bg-amber-400 group-hover/gap:bg-rose-400'
-            : 'h-10 w-0.5 bg-transparent group-hover/gap:h-16 group-hover/gap:bg-amber-400/60 [@media(hover:none)]:bg-slate-600'
+            : 'h-10 w-0.5 bg-transparent group-hover/photos:bg-slate-600/70 group-hover/gap:h-16 group-hover/gap:bg-amber-400/60 [@media(hover:none)]:bg-slate-600'
         }`}
       />
     </button>
@@ -185,15 +190,32 @@ export interface StationCardProps {
   totalStations: number
   prevStation?: Station
   nextStation?: Station
+  /** 全部站點列表（提供跨站點快速移動） */
+  allStations?: Station[]
+  /** 由地圖點擊觸發的高亮狀態 */
+  isHighlighted?: boolean
+  /** 隱藏卡片內的「與下一站合併」按鈕（改由外部時間軸連接器顯示） */
+  hideInlineMerge?: boolean
+  /** 點擊站點編號時通知地圖平滑定位至本站 */
+  onFocusOnMap?: () => void
 }
 
 /**
  * 單一站點卡片 (§4.3)
  * - 照片依「頁」分組顯示：拖曳排序、點兩張照片之間的空隙加上／取消分隔線
  * - 每頁下方的設定條：開啟頁面設定視窗（拼接樣式＋運鏡）
- * - 站點名稱、備註、刪除照片（可復原）、設為封面、拆分站點、移到相鄰站點、與下一站合併
+ * - 站點名稱、備註、刪除照片（可復原）、放大檢視、設為封面、拆分站點、移到其他站點、恢復自動分頁
  */
-export function StationCard({ station, stationIndex, prevStation, nextStation }: StationCardProps) {
+export function StationCard({
+  station,
+  stationIndex,
+  prevStation,
+  nextStation,
+  allStations,
+  isHighlighted = false,
+  hideInlineMerge = false,
+  onFocusOnMap
+}: StationCardProps) {
   const photosMap = useJourneyStore((s) => s.journey.photos)
   const settings = useJourneyStore((s) => s.journey.settings)
   const coverPhotoId = useJourneyStore((s) => s.journey.coverPhotoId)
@@ -207,8 +229,10 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
   const movePhotoToStation = useJourneyStore((s) => s.movePhotoToStation)
   const deletePhoto = useJourneyStore((s) => s.deletePhoto)
   const updateStationPages = useJourneyStore((s) => s.updateStationPages)
+  const resetStationPages = useJourneyStore((s) => s.resetStationPages)
 
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
+  const [lightboxPhotoId, setLightboxPhotoId] = useState<string | null>(null)
   const [editingPageId, setEditingPageId] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState<string | null>(null)
@@ -287,20 +311,28 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
           movePhotoToStation(droppedId, station.id)
         }
       }}
-      className={`rounded-2xl border p-4 transition ${
+      className={`rounded-2xl border p-4 transition duration-300 ${
         isDropTarget
           ? 'border-amber-400 bg-amber-500/10'
-          : includedCount > 0
-            ? 'border-slate-800 bg-slate-900/90'
-            : 'border-slate-800/50 bg-slate-900/40 opacity-65'
+          : isHighlighted
+            ? 'border-amber-400 bg-slate-900 ring-2 ring-amber-400/50 shadow-lg shadow-amber-500/15'
+            : includedCount > 0
+              ? 'border-slate-800 bg-slate-900/90'
+              : 'border-slate-800/50 bg-slate-900/40 opacity-65'
       }`}
     >
-      {/* 頂部：站點編號、名稱、日期範圍、刪除站點 */}
+      {/* 頂部：站點編號、名稱、日期範圍、恢復自動分頁、刪除站點 */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-[200px] flex-1 items-center gap-2.5">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-slate-950">
+          <button
+            type="button"
+            onClick={onFocusOnMap}
+            title="在地圖上定位此站點"
+            aria-label={`在地圖上定位站點 ${stationIndex + 1}`}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-slate-950 transition hover:scale-110 hover:bg-amber-400"
+          >
             {stationIndex + 1}
-          </span>
+          </button>
           <input
             type="text"
             aria-label="站點名稱"
@@ -319,14 +351,26 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
           />
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-400">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           {dateRange && <span className="rounded-md bg-slate-800 px-2 py-1 font-mono text-slate-300">{dateRange}</span>}
           <span>
             入選 {includedCount}/{stationPhotos.length} · {pages.length} 頁
           </span>
+          {station.pages && (
+            <button
+              type="button"
+              title="清除本站手動分頁與樣式指定，恢復隨全域「自動拼圖」與「連拍門檻」自動分頁"
+              onClick={() => resetStationPages(station.id)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1 text-[11px] font-medium text-amber-300 transition hover:bg-slate-800"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>恢復自動分頁</span>
+            </button>
+          )}
           <button
             type="button"
             title="刪除站點（將本站所有照片改為不入選）"
+            aria-label="刪除站點"
             onClick={() => deleteStation(station.id)}
             className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-500/15 hover:text-rose-400"
           >
@@ -339,6 +383,7 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
       <div className="mt-2.5">
         <input
           type="text"
+          aria-label="站點備註"
           value={station.note ?? ''}
           onChange={(e) => updateStationNote(station.id, e.target.value)}
           placeholder="填寫站點備註（預設顯示於本站所有頁面左下角）…"
@@ -346,14 +391,10 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
         />
       </div>
 
-      <p className="mt-3 text-[11px] text-slate-500">
-        拖曳照片排序 · 點兩張照片之間的空隙加上或取消分隔線，分隔線之間的照片合成同一頁 · 點頁面下方的設定條調整拼接與運鏡
-      </p>
-
       {/* 照片依頁分組 */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setDraggingId(null)}>
         <SortableContext items={flatIds} strategy={rectSortingStrategy}>
-          <div className="mt-2 flex flex-wrap items-start gap-y-3">
+          <div className="group/photos mt-3 flex flex-wrap items-start gap-y-3">
             {pages.map((page, pageIdx) => {
               const style = resolvedStyles[pageIdx]
               const prevPage = pageIdx > 0 ? pages[pageIdx - 1] : undefined
@@ -390,6 +431,7 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
                               isCover={coverPhotoId === photoId}
                               isSelected={selectedPhotoId === photoId}
                               onSelect={() => setSelectedPhotoId((prev) => (prev === photoId ? null : photoId))}
+                              onDoubleClick={() => setLightboxPhotoId(photoId)}
                               onDelete={() => {
                                 if (selectedPhotoId === photoId) setSelectedPhotoId(null)
                                 deletePhoto(photoId)
@@ -452,6 +494,15 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
+                onClick={() => setLightboxPhotoId(selectedPhoto.id)}
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1 font-medium text-slate-200 hover:bg-slate-700"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+                <span>放大檢視</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setCoverPhoto(selectedPhoto.id)}
                 className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 font-medium transition ${
                   coverPhotoId === selectedPhoto.id ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
@@ -500,6 +551,28 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
                 </button>
               )}
 
+              {allStations && allStations.length > 2 && (
+                <select
+                  aria-label="移至指定站點"
+                  value=""
+                  onChange={(e) => {
+                    if (!e.target.value) return
+                    movePhotoToStation(selectedPhoto.id, e.target.value)
+                    setSelectedPhotoId(null)
+                  }}
+                  className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="">移至其他站點…</option>
+                  {allStations.map((target, idx) =>
+                    target.id === station.id ? null : (
+                      <option key={target.id} value={target.id}>
+                        站點 {idx + 1}：{getStationDisplayName(target)}
+                      </option>
+                    )
+                  )}
+                </select>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -524,8 +597,8 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
         </div>
       )}
 
-      {/* 與下一站合併 */}
-      {nextStation && (
+      {/* 與下一站合併（當未由外部連接器接管時保留） */}
+      {nextStation && !hideInlineMerge && (
         <div className="mt-3 flex justify-center border-t border-slate-800/80 pt-2.5">
           <button
             type="button"
@@ -536,6 +609,19 @@ export function StationCard({ station, stationIndex, prevStation, nextStation }:
             <span>與下一站「{getStationDisplayName(nextStation)}」合併</span>
           </button>
         </div>
+      )}
+
+      {lightboxPhotoId && photosMap[lightboxPhotoId] && (
+        <PhotoLightboxModal
+          station={station}
+          photoIds={flatIds}
+          photoId={lightboxPhotoId}
+          onSelectPhoto={(id) => {
+            setLightboxPhotoId(id)
+            setSelectedPhotoId(id)
+          }}
+          onClose={() => setLightboxPhotoId(null)}
+        />
       )}
 
       {editingIdx >= 0 && resolvedStyles[editingIdx] && (

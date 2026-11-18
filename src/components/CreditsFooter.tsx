@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { BUILTIN_TRACKS } from '../constants/music-library'
+import { useModalDialog } from '../hooks/use-modal-dialog'
 
 interface CreditEntry {
   name: string
@@ -90,20 +91,7 @@ function CreditList({ title, entries }: { title: string; entries: CreditEntry[] 
  */
 export function CreditsFooter() {
   const [isOpen, setIsOpen] = useState(false)
-
-  useEffect(() => {
-    if (!isOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsOpen(false)
-    }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [isOpen])
+  const dialogRef = useModalDialog(isOpen, () => setIsOpen(false))
 
   return (
     <footer className="border-t border-slate-800/80 px-4 py-5 text-center">
@@ -121,9 +109,11 @@ export function CreditsFooter() {
           onClick={() => setIsOpen(false)}
         >
           <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="credits-title"
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
             className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl border border-slate-700 bg-slate-900 text-left shadow-2xl"
           >

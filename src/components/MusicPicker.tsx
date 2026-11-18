@@ -26,15 +26,26 @@ export function MusicPicker() {
   const [auditionId, setAuditionId] = useState<BuiltinTrackId | null>(null)
   const [uploadState, setUploadState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const stopAudition = () => {
+      auditionRef.current?.pause()
+      setAuditionId(null)
+    }
+    window.addEventListener('stop-music-audition', stopAudition)
+    return () => {
+      window.removeEventListener('stop-music-audition', stopAudition)
       auditionRef.current?.pause()
       auditionRef.current = null
-    },
-    []
-  )
+    }
+  }, [])
 
-  const setMusic = (patch: Partial<typeof music>) => updateSettings({ music: { ...music, ...patch } })
+  const setMusic = (patch: Partial<typeof music>) => {
+    if (patch.source === 'none' || patch.source === 'custom' || (patch.builtinTrackId && patch.builtinTrackId !== auditionId)) {
+      auditionRef.current?.pause()
+      setAuditionId(null)
+    }
+    updateSettings({ music: { ...music, ...patch } })
+  }
 
   const toggleAudition = (id: BuiltinTrackId) => {
     const track = BUILTIN_TRACKS.find((t) => t.id === id)
@@ -44,6 +55,7 @@ export function MusicPicker() {
       setAuditionId(null)
       return
     }
+    window.dispatchEvent(new Event('pause-preview-player'))
     auditionRef.current?.pause()
     const audio = new Audio(builtinTrackUrl(track))
     audio.volume = music.volume
@@ -84,8 +96,13 @@ export function MusicPicker() {
         <p className="mt-0.5 text-xs text-slate-400">會依影片長度自動循環或裁切，開頭淡入、結尾淡出。內建曲目皆為 CC0 或公眾領域，音量已統一。</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <button type="button" onClick={() => setMusic({ source: 'none' })} className={optionClass(music.source === 'none')}>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+        <button
+          type="button"
+          aria-pressed={music.source === 'none'}
+          onClick={() => setMusic({ source: 'none' })}
+          className={optionClass(music.source === 'none')}
+        >
           <VolumeX className="h-4 w-4" />
           <span className="font-semibold">無配樂</span>
         </button>
@@ -96,6 +113,7 @@ export function MusicPicker() {
             <div key={track.id} className={optionClass(selected)}>
               <button
                 type="button"
+                aria-pressed={selected}
                 onClick={() => setMusic({ source: 'builtin', builtinTrackId: track.id })}
                 className="absolute inset-0 rounded-xl"
                 aria-label={`選用 ${track.style}`}
@@ -122,6 +140,7 @@ export function MusicPicker() {
             <>
               <button
                 type="button"
+                aria-pressed={music.source === 'custom'}
                 onClick={() => setMusic({ source: 'custom' })}
                 className="absolute inset-0 rounded-xl"
                 aria-label="選用自己的音樂"

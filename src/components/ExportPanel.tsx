@@ -26,16 +26,28 @@ export function ExportPanel() {
   const summary = useJourneySummary()
 
   const abortControllerRef = useRef<AbortController | null>(null)
+  const encodingStartRef = useRef<number | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [progress, setProgress] = useState<VideoExportProgress | null>(null)
+  const [etaText, setEtaText] = useState<string | null>(null)
   const [exportedBlob, setExportedBlob] = useState<Blob | null>(null)
   const [downgradeNotice, setDowngradeNotice] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  const formatRemainingEta = (remainingMs: number): string => {
+    const sec = Math.max(1, Math.round(remainingMs / 1000))
+    if (sec < 60) return `約 ${sec} 秒`
+    const m = Math.floor(sec / 60)
+    const s = sec % 60
+    return s > 0 ? `約 ${m} 分 ${s} 秒` : `約 ${m} 分`
+  }
 
   const handleStartExport = async () => {
     setErrorMsg(null)
     setDowngradeNotice(null)
     setExportedBlob(null)
+    setEtaText(null)
+    encodingStartRef.current = null
     setIsExporting(true)
 
     const controller = new AbortController()
@@ -48,6 +60,22 @@ export function ExportPanel() {
         signal: controller.signal,
         onProgress: (p) => {
           setProgress(p)
+          if (p.phase === 'encoding') {
+            if (encodingStartRef.current === null) {
+              encodingStartRef.current = performance.now()
+            } else if (p.currentFrame >= 5 && p.totalFrames > p.currentFrame) {
+              const elapsedMs = performance.now() - encodingStartRef.current
+              const msPerFrame = elapsedMs / p.currentFrame
+              const remainingMs = msPerFrame * (p.totalFrames - p.currentFrame)
+              setEtaText(formatRemainingEta(remainingMs))
+            }
+          } else if (p.phase === 'paused') {
+            // 暫停後重新估算起點，避免背景閒置時間拉偏預估
+            encodingStartRef.current = null
+            setEtaText(null)
+          } else if (p.phase === 'muxing') {
+            setEtaText(null)
+          }
           if (p.downgradedTo720p) {
             setDowngradeNotice(
               '您的裝置硬體編碼器不支援 1080p H.264，已自動改用 720p 進行輸出。'
@@ -149,6 +177,7 @@ export function ExportPanel() {
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              aria-pressed={journey.settings.orientation === 'landscape'}
               disabled={isExporting}
               onClick={() => updateSettings({ orientation: 'landscape' })}
               className={`rounded-xl py-2.5 text-xs font-semibold transition ${
@@ -161,6 +190,7 @@ export function ExportPanel() {
             </button>
             <button
               type="button"
+              aria-pressed={journey.settings.orientation === 'portrait'}
               disabled={isExporting}
               onClick={() => updateSettings({ orientation: 'portrait' })}
               className={`rounded-xl py-2.5 text-xs font-semibold transition ${
@@ -179,6 +209,7 @@ export function ExportPanel() {
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              aria-pressed={journey.settings.resolution === '1080p'}
               disabled={isExporting}
               onClick={() => updateSettings({ resolution: '1080p' })}
               className={`rounded-xl py-2.5 text-xs font-semibold transition ${
@@ -191,6 +222,7 @@ export function ExportPanel() {
             </button>
             <button
               type="button"
+              aria-pressed={journey.settings.resolution === '720p'}
               disabled={isExporting}
               onClick={() => updateSettings({ resolution: '720p' })}
               className={`rounded-xl py-2.5 text-xs font-semibold transition ${
@@ -229,7 +261,10 @@ export function ExportPanel() {
                       : '正在封裝 MP4 影片檔…'}
               </span>
             </span>
-            <span className="font-mono font-bold text-white">{progress.percent}%</span>
+            <span className="font-mono font-bold text-white">
+              {etaText ? `剩餘 ${etaText} · ` : ''}
+              {progress.percent}%
+            </span>
           </div>
 
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-800">

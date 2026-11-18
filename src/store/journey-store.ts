@@ -97,6 +97,8 @@ interface JourneyStoreState {
   dismissDeletedPhoto: () => void
   /** 儲存站點的手動分頁（拖曳排序、分隔線、樣式與運鏡設定） */
   updateStationPages: (stationId: string, pages: StationPage[]) => void
+  /** 清除指定站點的手動分頁，恢復依自動拼圖與連拍門檻分頁 */
+  resetStationPages: (stationId: string) => void
   setCoverPhoto: (photoId: string) => void
   reorderPhotoInStation: (stationId: string, fromIndex: number, toIndex: number) => void
   movePhotoToStation: (photoId: string, targetStationId: string) => void
@@ -134,14 +136,14 @@ function createEmptyJourney(): Journey {
 }
 
 /**
- * 決定預設封面照片 ID（若原封面有效則保留，否則取第一站第一張入選照片）
+ * 決定預設封面照片 ID（若原封面仍為入選照片則保留，否則取第一站第一張入選照片）
  */
 function pickDefaultCoverPhotoId(
   photos: Record<string, Photo>,
   stations: Station[],
   currentCoverId?: string
 ): string | undefined {
-  if (currentCoverId && photos[currentCoverId]) {
+  if (currentCoverId && photos[currentCoverId]?.included) {
     return currentCoverId
   }
   for (const st of stations) {
@@ -196,6 +198,7 @@ const HISTORY_ACTIONS: Partial<Record<keyof JourneyStoreState, ((...args: never[
   deletePhoto: null,
   undoDeletePhoto: null,
   updateStationPages: null,
+  resetStationPages: null,
   setCoverPhoto: null,
   reorderPhotoInStation: null,
   movePhotoToStation: null,
@@ -440,9 +443,21 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => withUndoH
     const firstPhotos = firstIds.map((id) => journey.photos[id]).filter(Boolean)
     const secondPhotos = secondIds.map((id) => journey.photos[id]).filter(Boolean)
 
+    // 拆分前若有手動分頁，兩站各自清理掉已移往另一側的照片，並依剩餘張數校正失效的版面樣式
+    const cleanSplitPages = (subIds: string[]): StationPage[] | undefined => {
+      if (!targetStation.pages) return undefined
+      const cleaned = resolveStationPages({ ...targetStation, photoIds: subIds }, journey.photos, journey.settings)
+      return cleaned.map((page) =>
+        page.photoIds.length <= 1 && page.layout && page.layout !== 'single'
+          ? { ...page, layout: undefined }
+          : page
+      )
+    }
+
     const stationA: Station = {
       ...targetStation,
       photoIds: firstIds,
+      pages: cleanSplitPages(firstIds),
       center: computeStationCenter(firstPhotos, targetStation.center)
     }
 
@@ -450,7 +465,7 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => withUndoH
     const stationB: Station = {
       id: createStationId(),
       photoIds: secondIds,
-      pages: targetStation.pages,
+      pages: cleanSplitPages(secondIds),
       center: computeStationCenter(secondPhotos, targetStation.center),
       autoName: `站點 ${stIdx + 2}`
     }
@@ -627,12 +642,36 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => withUndoH
     void saveJourneyDraft(nextJourney)
   },
 
-  setCoverPhoto: (photoId) => {
+  resetStationPages: (stationId) => {
     const { journey } = get()
-    if (!journey.photos[photoId]) return
-    const nextJourney: Journey = { ...journey, coverPhotoId: photoId }
+    const stations = journey.stations.map((st) => {
+      if (st.id !== stationId) return st
+      const cleared: Station = { ...st, pages: undefined }
+      const autoPages = resolveStationPages(cleared, journey.photos, journey.settings)
+      return {
+        ...cleared,
+        photoIds: autoPages.flatMap((p) => p.photoIds)
+      }
+    })
+    const nextJourney: Journey = { ...journey, stations }
     set({ journey: nextJourney })
     void saveJourneyDraft(nextJourney)
+  },
+
+  setCoverPhoto: (photoId) => {
+    const { journey } = get()
+    const target = journey.photos[photoId]
+    if (!target) return
+    // 手動將未入選的照片設為封面時，一併勾回入選，確保片頭與入選狀態一致
+    const photos = target.included
+      ? journey.photos
+      : { ...journey.photos, [photoId]: { ...target, included: true } }
+    const nextJourney: Journey = { ...journey, photos, coverPhotoId: photoId }
+    set({ journey: nextJourney })
+    void saveJourneyDraft(nextJourney)
+    if (!target.included) {
+      void get().refreshStationNamesAndRoutes()
+    }
   },
 
   reorderPhotoInStation: (stationId, fromIndex, toIndex) => {

@@ -229,19 +229,37 @@ export interface BatchPhotoReadResult {
   photos: Photo[]
   skippedVideos: string[]
   failedFiles: string[]
+  skippedDuplicates: string[]
+}
+
+/**
+ * 判斷兩張照片是否可視為重複選取（檔名相同且拍攝時間相同；無時間時改比對縮圖尺寸）
+ */
+export function isDuplicatePhoto(candidate: Pick<Photo, 'fileName' | 'captureTimeUtc' | 'width' | 'height'>, existing: Pick<Photo, 'fileName' | 'captureTimeUtc' | 'width' | 'height'>): boolean {
+  if (candidate.fileName !== existing.fileName) return false
+  if (candidate.captureTimeUtc !== undefined && existing.captureTimeUtc !== undefined) {
+    return candidate.captureTimeUtc === existing.captureTimeUtc
+  }
+  if (candidate.captureTimeUtc === undefined && existing.captureTimeUtc === undefined) {
+    return candidate.width === existing.width && candidate.height === existing.height
+  }
+  return false
 }
 
 /**
  * 依序處理多張照片（避免同時解碼多張大圖造成行動裝置記憶體崩潰）
  * @param files 檔案清單
  * @param onProgress 進度回呼
+ * @param existingPhotos 目前旅程中已載入的照片清單（用於略過重複選取的照片）
  */
 export async function processPhotoFilesSequentially(
   files: File[],
-  onProgress?: (progress: BatchPhotoReadProgress) => void
+  onProgress?: (progress: BatchPhotoReadProgress) => void,
+  existingPhotos: Photo[] = []
 ): Promise<BatchPhotoReadResult> {
   const skippedVideos: string[] = []
   const failedFiles: string[] = []
+  const skippedDuplicates: string[] = []
   const candidateFiles: File[] = []
 
   for (const f of files) {
@@ -255,6 +273,7 @@ export async function processPhotoFilesSequentially(
   }
 
   const photos: Photo[] = []
+  const knownPhotos: Photo[] = [...existingPhotos]
   const totalCount = candidateFiles.length
 
   for (let i = 0; i < candidateFiles.length; i++) {
@@ -268,7 +287,12 @@ export async function processPhotoFilesSequentially(
     try {
       const id = `photo-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`
       const photo = await processSinglePhotoFile(file, id)
+      if (knownPhotos.some((known) => isDuplicatePhoto(photo, known))) {
+        skippedDuplicates.push(file.name)
+        continue
+      }
       photos.push(photo)
+      knownPhotos.push(photo)
     } catch {
       failedFiles.push(file.name)
     }
@@ -283,6 +307,7 @@ export async function processPhotoFilesSequentially(
   return {
     photos,
     skippedVideos,
-    failedFiles
+    failedFiles,
+    skippedDuplicates
   }
 }

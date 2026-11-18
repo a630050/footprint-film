@@ -11,6 +11,7 @@ import {
 import { useRef, useState } from 'react'
 import { MAX_PHOTOS_PER_BATCH } from '../constants/video-config'
 import { useJourneySummary } from '../hooks/use-journey-summary'
+import { useModalDialog } from '../hooks/use-modal-dialog'
 import {
   processPhotoFilesSequentially,
   type BatchPhotoReadProgress
@@ -19,15 +20,19 @@ import { useJourneyStore } from '../store/journey-store'
 
 /**
  * 步驟 ①：選照片元件
- * 涵蓋：選取檔案（上限 100 張）、影片檔略過提示、iOS/Android 保留定位說明、隱私說明、逐張讀取縮小進度與統計
+ * 涵蓋：選取檔案（上限 100 張）、影片檔略過提示、重複照片過濾、iOS/Android 保留定位說明、隱私說明、逐張讀取縮小進度與統計
  */
 export function PhotoPicker() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const existingPhotosMap = useJourneyStore((s) => s.journey.photos)
+  const orientation = useJourneyStore((s) => s.journey.settings.orientation)
   const appendUploadedPhotos = useJourneyStore((s) => s.appendUploadedPhotos)
+  const updateSettings = useJourneyStore((s) => s.updateSettings)
   const setCurrentStep = useJourneyStore((s) => s.setCurrentStep)
   const summary = useJourneySummary()
   const hasManualStationEdits = useJourneyStore((s) => s.journey.hasManualStationEdits)
   const [showAppendConfirm, setShowAppendConfirm] = useState(false)
+  const appendDialogRef = useModalDialog(showAppendConfirm, () => setShowAppendConfirm(false))
 
   // 加入新照片會依時間重新分站；若使用者已手動編輯過站點，先確認（與調整分站半徑的規則一致）
   const openFilePicker = () => {
@@ -64,13 +69,23 @@ export function PhotoPicker() {
     setWarnings(nextWarnings)
 
     try {
-      const result = await processPhotoFilesSequentially(filesToProcess, (p) => {
-        setProgress(p)
-      })
+      const result = await processPhotoFilesSequentially(
+        filesToProcess,
+        (p) => {
+          setProgress(p)
+        },
+        Object.values(existingPhotosMap)
+      )
 
       if (result.skippedVideos.length > 0) {
         nextWarnings.push(
           `第一版不支援影片，已略過 ${result.skippedVideos.length} 個影片檔（${result.skippedVideos.slice(0, 3).join('、')}${result.skippedVideos.length > 3 ? '…' : ''}）。`
+        )
+      }
+
+      if (result.skippedDuplicates.length > 0) {
+        nextWarnings.push(
+          `已自動略過 ${result.skippedDuplicates.length} 張重複選取的照片（${result.skippedDuplicates.slice(0, 3).join('、')}${result.skippedDuplicates.length > 3 ? '…' : ''}）。`
         )
       }
 
@@ -203,9 +218,20 @@ export function PhotoPicker() {
       </div>
 
       {showAppendConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-4">
-            <h4 className="text-base font-bold text-white">加入照片會重新分站</h4>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setShowAppendConfirm(false)}
+        >
+          <div
+            ref={appendDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="append-confirm-title"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-4"
+          >
+            <h4 id="append-confirm-title" className="text-base font-bold text-white">加入照片會重新分站</h4>
             <p className="text-sm leading-relaxed text-slate-300">
               新照片會和現有照片一起依時間重新分站，這會清除站點名稱、站點備註與合併／拆分設定；照片備註與入選勾選會保留。
             </p>
@@ -277,6 +303,37 @@ export function PhotoPicker() {
           <p className="text-xs text-slate-400 text-center">
             {summary.exifCount} 張有定位、{summary.inferredCount} 張推定位置、{summary.unassignedCount} 張未歸類
           </p>
+
+          {/* 提前選擇影片方向，讓步驟 ② 的自動拼圖與單頁預覽依正確比例排版 */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-3.5 py-2.5">
+            <span className="text-xs font-medium text-slate-300">影片方向</span>
+            <div className="flex gap-2" role="group" aria-label="影片方向">
+              <button
+                type="button"
+                aria-pressed={orientation === 'landscape'}
+                onClick={() => updateSettings({ orientation: 'landscape' })}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  orientation === 'landscape'
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                橫式 16:9
+              </button>
+              <button
+                type="button"
+                aria-pressed={orientation === 'portrait'}
+                onClick={() => updateSettings({ orientation: 'portrait' })}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  orientation === 'portrait'
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                直式 9:16
+              </button>
+            </div>
+          </div>
 
           <div className="flex justify-end pt-2">
             <button

@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { useModalDialog } from '../hooks/use-modal-dialog'
 import { useJourneyStore } from '../store/journey-store'
 
 /** 滑桿停止拖動多久後才真正套用（毫秒）：拖動過程中不重新分站，也不發出地名／路線查詢 */
@@ -74,7 +75,8 @@ function formatBurstThreshold(sec: number): string {
 
 /**
  * 可收合的旅程設定區 (§4.3)
- * 包含：分站半徑、長途門檻、每格秒數（1–4 秒，預設 2）、自動拼圖開關、旅程標題
+ * 包含：旅程標題、影片方向、分站半徑、長途門檻、每格秒數（1–4 秒，預設 2）、自動拼圖與隨機開關
+ * 預設收合並顯示精簡摘要，確保手機進入步驟 ② 時首屏即可看見小地圖與站點卡片
  * 當調整分站半徑且已有手動編輯時，先跳出確認對話框
  */
 export function SettingsPanel() {
@@ -83,8 +85,13 @@ export function SettingsPanel() {
   const updateSettings = useJourneyStore((s) => s.updateSettings)
   const reclusterWithRadius = useJourneyStore((s) => s.reclusterWithRadius)
 
-  const [isOpen, setIsOpen] = useState(true)
+  const [isOpen, setIsOpen] = useState(false)
   const [pendingRadiusKm, setPendingRadiusKm] = useState<number | null>(null)
+  const titleId = useId()
+  const radiusId = useId()
+  const thresholdId = useId()
+  const burstId = useId()
+  const panelId = useId()
 
   const handleRadiusChange = (newRadius: number) => {
     if (journey.hasManualStationEdits) {
@@ -114,50 +121,93 @@ export function SettingsPanel() {
     radiusSlider.reset()
   }
 
+  const reclusterDialogRef = useModalDialog(pendingRadiusKm !== null, cancelRecluster)
+
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/90">
       <button
         type="button"
+        aria-expanded={isOpen}
+        aria-controls={panelId}
         onClick={() => setIsOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:bg-slate-800/50 transition rounded-xl"
+        className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:bg-slate-800/50 transition rounded-xl"
       >
         <div className="flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-amber-400" />
-          <span>旅程標題與進階設定（分站、每頁秒數、拼接與運鏡）</span>
+          <span>旅程標題與進階設定</span>
         </div>
-        {isOpen ? (
-          <ChevronUp className="h-4 w-4 text-slate-400" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-slate-400" />
-        )}
+        <div className="flex items-center gap-2">
+          <span className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+            {journey.settings.orientation === 'landscape' ? '橫式 16:9' : '直式 9:16'} · 分站 {journey.settings.stationRadiusKm}km · 每頁 {journey.settings.secondsPerCell}秒
+          </span>
+          {isOpen ? (
+            <ChevronUp className="h-4 w-4 text-slate-400" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-slate-400" />
+          )}
+        </div>
       </button>
 
       {isOpen && (
-        <div className="border-t border-slate-800 p-4 space-y-4 text-xs">
-          {/* 旅程標題 */}
-          <div className="space-y-1.5">
-            <label className="block font-medium text-slate-300">
-              旅程標題（片頭與片尾共用）
-            </label>
-            <input
-              type="text"
-              value={journey.title}
-              onChange={(e) => updateJourneyTitle(e.target.value)}
-              placeholder="例如：桃園 → 漢米頓"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-            />
+        <div id={panelId} className="border-t border-slate-800 p-4 space-y-4 text-xs">
+          {/* 旅程標題與影片方向 */}
+          <div className="grid gap-4 sm:grid-cols-12">
+            <div className="space-y-1.5 sm:col-span-7">
+              <label htmlFor={titleId} className="block font-medium text-slate-300">
+                旅程標題（片頭與片尾共用）
+              </label>
+              <input
+                id={titleId}
+                type="text"
+                value={journey.title}
+                onChange={(e) => updateJourneyTitle(e.target.value)}
+                placeholder="例如：桃園 → 漢米頓"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-5">
+              <span className="block font-medium text-slate-300">影片方向（影響自動拼圖）</span>
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="影片方向">
+                <button
+                  type="button"
+                  aria-pressed={journey.settings.orientation === 'landscape'}
+                  onClick={() => updateSettings({ orientation: 'landscape' })}
+                  className={`rounded-lg py-2 font-semibold transition ${
+                    journey.settings.orientation === 'landscape'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  橫式 16:9
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={journey.settings.orientation === 'portrait'}
+                  onClick={() => updateSettings({ orientation: 'portrait' })}
+                  className={`rounded-lg py-2 font-semibold transition ${
+                    journey.settings.orientation === 'portrait'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  直式 9:16
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             {/* 分站半徑 */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-slate-300">
-                <label className="font-medium">分站半徑</label>
+                <label htmlFor={radiusId} className="font-medium">分站半徑</label>
                 <span className="font-mono text-amber-400">
                   {radiusSlider.draft} km
                 </span>
               </div>
               <input
+                id={radiusId}
                 type="range"
                 min={1}
                 max={50}
@@ -174,12 +224,13 @@ export function SettingsPanel() {
             {/* 長途門檻 */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-slate-300">
-                <label className="font-medium">長途門檻</label>
+                <label htmlFor={thresholdId} className="font-medium">長途門檻</label>
                 <span className="font-mono text-amber-400">
                   {thresholdSlider.draft} km
                 </span>
               </div>
               <input
+                id={thresholdId}
                 type="range"
                 min={20}
                 max={500}
@@ -196,16 +247,17 @@ export function SettingsPanel() {
             {/* 每格秒數 */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-slate-300">
-                <label className="font-medium">每頁秒數</label>
+                <span className="font-medium">每頁秒數</span>
                 <span className="font-mono text-amber-400">
                   {journey.settings.secondsPerCell} 秒
                 </span>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2" role="group" aria-label="每頁秒數">
                 {[1, 2, 3, 4].map((sec) => (
                   <button
                     key={sec}
                     type="button"
+                    aria-pressed={journey.settings.secondsPerCell === sec}
                     onClick={() => updateSettings({ secondsPerCell: sec })}
                     className={`flex-1 rounded-lg py-1.5 font-medium transition ${
                       journey.settings.secondsPerCell === sec
@@ -222,10 +274,11 @@ export function SettingsPanel() {
             {/* 連拍門檻 */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-slate-300">
-                <label className="font-medium">連拍門檻</label>
+                <label htmlFor={burstId} className="font-medium">連拍門檻</label>
                 <span className="font-mono text-amber-400">{formatBurstThreshold(burstSlider.draft)}</span>
               </div>
               <input
+                id={burstId}
                 type="range"
                 min={0}
                 max={300}
@@ -260,7 +313,7 @@ export function SettingsPanel() {
               onChange={(checked) => updateSettings({ randomMotion: checked })}
             />
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-xs text-slate-400">
             自動拼圖與連拍門檻只影響還沒手動分頁的站點；在站點中手動指定的樣式與運鏡不受隨機影響。
           </p>
         </div>
@@ -268,9 +321,20 @@ export function SettingsPanel() {
 
       {/* 調整分站半徑時的確認對話框 (§4.3) */}
       {pendingRadiusKm !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-4">
-            <h4 className="text-base font-bold text-white">確認重新分站？</h4>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={cancelRecluster}
+        >
+          <div
+            ref={reclusterDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recluster-confirm-title"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-4"
+          >
+            <h4 id="recluster-confirm-title" className="text-base font-bold text-white">確認重新分站？</h4>
             <p className="text-sm leading-relaxed text-slate-300">
               重新分站會清除站點名稱、站點備註、合併／拆分與分頁設定；照片備註與入選勾選會保留。
             </p>

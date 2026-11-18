@@ -1,9 +1,10 @@
 import { Loader2, Maximize, Minimize, Pause, Play, RotateCcw } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getVideoDimensions } from '../constants/video-config'
+import { locateTimelinePosition } from '../domain/timeline-builder'
 import { useJourneySummary } from '../hooks/use-journey-summary'
 import { usePreviewMusic } from '../hooks/use-preview-music'
-import { FramePainter } from '../services/frame-painter'
+import { FramePainter, getStationDisplayName } from '../services/frame-painter'
 import { DeterministicMapRenderer } from '../services/map-renderer'
 import { useJourneyStore } from '../store/journey-store'
 
@@ -71,6 +72,68 @@ export function PreviewPlayer() {
   timelineRef.current = summary.timeline
 
   usePreviewMusic(journey, isPlaying, timeRef, totalDurationMs)
+
+  // 避免與配樂試聽同時出聲：開始預覽時停止下方試聽，下方試聽時暫停預覽
+  useEffect(() => {
+    if (isPlaying) {
+      window.dispatchEvent(new Event('stop-music-audition'))
+    }
+  }, [isPlaying])
+
+  useEffect(() => {
+    const pausePreview = () => setIsPlaying(false)
+    window.addEventListener('pause-preview-player', pausePreview)
+    return () => window.removeEventListener('pause-preview-player', pausePreview)
+  }, [])
+
+  // 計算各段落的起始時間點與目前播放段落標籤，供狀態徽章與快速跳轉使用
+  const chapterStops = useMemo(() => {
+    const stationMap = new Map(journey.stations.map((s) => [s.id, s]))
+    const stationOrderMap = new Map(journey.stations.map((s, i) => [s.id, i + 1]))
+    const stops: { key: string; label: string; startMs: number; endMs: number }[] = []
+    let acc = 0
+    for (let i = 0; i < summary.timeline.length; i++) {
+      const seg = summary.timeline[i]
+      const startMs = acc
+      const endMs = acc + seg.durationMs
+      acc = endMs
+      if (seg.type === 'INTRO') {
+        stops.push({ key: `intro-${i}`, label: '片頭', startMs, endMs })
+      } else if (seg.type === 'OPENING_LOCATOR') {
+        stops.push({ key: `open-${i}`, label: '開場定位', startMs, endMs })
+      } else if (seg.type === 'STATION') {
+        const st = stationMap.get(seg.stationId)
+        const num = stationOrderMap.get(seg.stationId) ?? ''
+        stops.push({
+          key: `st-${seg.stationId}`,
+          label: `站點 ${num}${st ? `：${getStationDisplayName(st)}` : ''}`,
+          startMs,
+          endMs
+        })
+      } else if (seg.type === 'OUTRO') {
+        stops.push({ key: `outro-${i}`, label: '片尾', startMs, endMs })
+      }
+    }
+    return stops
+  }, [summary.timeline, journey.stations])
+
+  const currentSegmentLabel = useMemo(() => {
+    const located = locateTimelinePosition(summary.timeline, displayTimeMs)
+    if (!located) return null
+    const seg = summary.timeline[located.segmentIndex]
+    if (!seg) return null
+    if (seg.type === 'INTRO') return '🎬 片頭'
+    if (seg.type === 'OPENING_LOCATOR') return '🌍 開場定位'
+    if (seg.type === 'OUTRO') return '🎞️ 片尾'
+    if (seg.type === 'STATION') {
+      const idx = journey.stations.findIndex((s) => s.id === seg.stationId)
+      const st = idx >= 0 ? journey.stations[idx] : undefined
+      return `📍 站點 ${idx + 1}：${getStationDisplayName(st)}`
+    }
+    const target = journey.stations.find((s) => s.id === seg.toStationId)
+    const icon = seg.routeKind === 'flight' ? '✈️' : '🚗'
+    return `${icon} 前往 ${getStationDisplayName(target)}`
+  }, [summary.timeline, displayTimeMs, journey.stations])
 
   const requestRender = useCallback(() => {
     if (isRenderingRef.current) {
@@ -262,10 +325,17 @@ export function PreviewPlayer() {
     >
       {!isFullscreen && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-          <span className="font-semibold text-slate-200">
-            即時預覽（{journey.settings.orientation === 'landscape' ? '橫式 16:9' : '直式 9:16'}）
-          </span>
-          <span>雙擊畫面可切換全螢幕 · 預覽時地圖偶爾延遲屬正常，正式輸出會逐幀等待完整繪製</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-200">
+              即時預覽（{journey.settings.orientation === 'landscape' ? '橫式 16:9' : '直式 9:16'}）
+            </span>
+            {currentSegmentLabel && (
+              <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+                {currentSegmentLabel}
+              </span>
+            )}
+          </div>
+          <span>雙擊畫面切換全螢幕 · 預覽時地圖偶爾延遲屬正常</span>
         </div>
       )}
 
@@ -371,6 +441,31 @@ export function PreviewPlayer() {
           {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
         </button>
       </div>
+
+      {/* 段落與站點快速跳轉膠囊 */}
+      {!isFullscreen && chapterStops.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="快速跳轉至段落或站點">
+          {chapterStops.map((stop) => {
+            const isActive =
+              displayTimeMs >= stop.startMs &&
+              (displayTimeMs < stop.endMs || stop.endMs >= totalDurationMs)
+            return (
+              <button
+                key={stop.key}
+                type="button"
+                onClick={() => seekTo(stop.startMs)}
+                className={`max-w-[160px] shrink-0 truncate rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                  isActive
+                    ? 'border-amber-500 bg-amber-500/15 text-amber-300'
+                    : 'border-slate-800 bg-slate-950/70 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                }`}
+              >
+                {stop.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

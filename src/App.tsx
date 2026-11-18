@@ -9,6 +9,7 @@ import { MusicPicker } from './components/MusicPicker'
 import { PreviewPlayer } from './components/PreviewPlayer'
 import { TravelerMarkerPicker } from './components/TravelerMarkerPicker'
 import { HistoryToast, UndoRedoButtons, useUndoShortcuts } from './components/UndoControls'
+import { useModalDialog } from './hooks/use-modal-dialog'
 import { isWebCodecsSupported } from './services/browser-support'
 import { useJourneyStore } from './store/journey-store'
 
@@ -33,6 +34,8 @@ export function App() {
   )
 
   const [supportedBrowser, setSupportedBrowser] = useState(true)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const resetDialogRef = useModalDialog(showResetConfirm, () => setShowResetConfirm(false))
   useUndoShortcuts()
 
   useEffect(() => {
@@ -79,16 +82,27 @@ export function App() {
             </div>
           </div>
 
-          {/* 三步驟切換列＋復原／重做 */}
-          <nav className="flex items-center gap-1 text-xs font-semibold sm:gap-1.5">
+          {/* 三步驟切換列＋復原／重做＋重新開始 */}
+          <nav aria-label="製作步驟" className="flex flex-wrap items-center gap-1 text-xs font-semibold sm:gap-1.5">
             {hasPhotos && (
               <>
                 <UndoRedoButtons />
+                <button
+                  type="button"
+                  title="清空目前照片並開始新的旅程"
+                  aria-label="開始新的旅程"
+                  onClick={() => setShowResetConfirm(true)}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-slate-400 transition hover:bg-slate-800 hover:text-rose-300"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">重新開始</span>
+                </button>
                 <span className="hidden text-slate-700 sm:inline">|</span>
               </>
             )}
             <button
               type="button"
+              aria-current={currentStep === 1 ? 'step' : undefined}
               onClick={() => setCurrentStep(1)}
               className={`whitespace-nowrap rounded-xl px-2 py-2 transition sm:px-3 sm:py-1.5 ${
                 currentStep === 1
@@ -98,10 +112,11 @@ export function App() {
             >
               ① 選照片
             </button>
-            <span className="hidden text-slate-700 sm:inline">/</span>
+            <span className="hidden text-slate-700 sm:inline" aria-hidden="true">/</span>
             <button
               type="button"
               disabled={!hasPhotos}
+              aria-current={currentStep === 2 ? 'step' : undefined}
               onClick={() => setCurrentStep(2)}
               className={`whitespace-nowrap rounded-xl px-2 py-2 transition sm:px-3 sm:py-1.5 ${
                 currentStep === 2
@@ -111,10 +126,11 @@ export function App() {
             >
               ② 編輯旅程
             </button>
-            <span className="hidden text-slate-700 sm:inline">/</span>
+            <span className="hidden text-slate-700 sm:inline" aria-hidden="true">/</span>
             <button
               type="button"
               disabled={!hasPhotos}
+              aria-current={currentStep === 3 ? 'step' : undefined}
               onClick={() => setCurrentStep(3)}
               className={`whitespace-nowrap rounded-xl px-2 py-2 transition sm:px-3 sm:py-1.5 ${
                 currentStep === 3
@@ -168,14 +184,63 @@ export function App() {
         {currentStep === 1 && <PhotoPicker />}
         {currentStep === 2 && <JourneyEditor />}
         {currentStep === 3 && (
-          <div className="mx-auto max-w-4xl space-y-5 px-4 py-5">
-            <PreviewPlayer />
-            <TravelerMarkerPicker />
-            <MusicPicker />
-            <ExportPanel />
+          <div className="mx-auto max-w-6xl px-4 py-5">
+            <div className="grid gap-5 lg:grid-cols-12 lg:items-start">
+              <div className="lg:col-span-7 lg:sticky lg:top-20">
+                <PreviewPlayer />
+              </div>
+              <div className="space-y-5 lg:col-span-5">
+                <ExportPanel />
+                <TravelerMarkerPicker />
+                <MusicPicker />
+              </div>
+            </div>
           </div>
         )}
       </main>
+
+      {showResetConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          onClick={() => setShowResetConfirm(false)}
+        >
+          <div
+            ref={resetDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-journey-title"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+          >
+            <h2 id="reset-journey-title" className="text-base font-bold text-white">
+              確定要開始新的旅程？
+            </h2>
+            <p className="text-sm leading-relaxed text-slate-300">
+              這會清除目前所有已載入的照片、站點編輯與備註，並清空瀏覽器中的草稿。此動作無法復原。
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirm(false)}
+                className="rounded-xl border border-slate-700 px-4 py-2 text-xs font-medium text-slate-300 transition hover:bg-slate-800"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowResetConfirm(false)
+                  void discardPendingDraftAndReset()
+                }}
+                className="rounded-xl bg-rose-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-rose-400"
+              >
+                清空並重新開始
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <CreditsFooter />
       <DeletedPhotoToast />
