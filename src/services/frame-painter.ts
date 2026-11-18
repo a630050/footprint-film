@@ -8,6 +8,7 @@ import {
   computeTileRects,
   type Rect
 } from '../domain/page-geometry'
+import { cropExceedsImage, fitCropToAspect } from '../domain/photo-crop'
 import { locateTimelinePosition } from '../domain/timeline-builder'
 import { DEFAULT_VISUAL_THEME } from '../themes/default-theme'
 import type { DisplayCell, Journey, Photo, Segment, Station } from '../types/journey'
@@ -428,6 +429,62 @@ export class FramePainter {
    * - 照片方向與目標框方向一致 → 填滿畫面（Cover）
    * - 不一致 → 完整顯示於中央（Contain），空白處以同一張照片放大模糊填滿（不留黑邊）
    */
+  /**
+   * 依使用者自訂的取景範圍繪製照片：範圍以中心為準裁成格子的比例；
+   * 範圍超出照片時（縮到比照片還小）先鋪模糊背景補滿
+   * @param zoomScale 額外放大倍率（片頭封面的緩慢推近用）
+   */
+  private drawPhotoCropped(
+    ctx: CanvasRenderingContext2D,
+    photo: Photo,
+    bitmap: ImageBitmap,
+    destX: number,
+    destY: number,
+    destW: number,
+    destH: number,
+    zoomScale = 1
+  ): void {
+    if (!photo.crop) return
+    const image = { width: bitmap.width, height: bitmap.height }
+    const fitted = fitCropToAspect(photo.crop, image, destW / destH)
+    const z = Math.max(1, zoomScale)
+    const rect = {
+      x: fitted.x + (fitted.w - fitted.w / z) / 2,
+      y: fitted.y + (fitted.h - fitted.h / z) / 2,
+      w: fitted.w / z,
+      h: fitted.h / z
+    }
+    const scale = destW / rect.w
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(destX, destY, destW, destH)
+    ctx.clip()
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    if (cropExceedsImage(rect, image)) {
+      drawImageCover(ctx, this.getBlurredBackground(photo, bitmap), destX, destY, destW, destH, 1.1)
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
+      ctx.shadowBlur = 24
+    }
+    ctx.drawImage(bitmap, destX - rect.x * scale, destY - rect.y * scale, image.width * scale, image.height * scale)
+    ctx.restore()
+  }
+
+  /** 拼圖格子內的照片：有自訂取景就依取景，否則填滿格子 */
+  private drawTilePhoto(
+    ctx: CanvasRenderingContext2D,
+    photo: Photo,
+    bitmap: ImageBitmap,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+  ): void {
+    if (photo.crop) this.drawPhotoCropped(ctx, photo, bitmap, x, y, w, h)
+    else drawImageCover(ctx, bitmap, x, y, w, h, 1)
+  }
+
   private drawPhotoAdaptive(
     ctx: CanvasRenderingContext2D,
     photo: Photo,
@@ -439,6 +496,12 @@ export class FramePainter {
     zoomScale: number,
     forceCover: boolean
   ): void {
+    // 使用者在放大檢視中自訂過取景：一律依取景範圍繪製
+    if (photo.crop) {
+      this.drawPhotoCropped(ctx, photo, bitmap, destX, destY, destW, destH, zoomScale)
+      return
+    }
+
     const isPhotoLandscape = bitmap.width >= bitmap.height
     const isBoxLandscape = destW >= destH
 
@@ -1001,7 +1064,7 @@ export class FramePainter {
         ctx.globalAlpha = eased
         const w = r.w * shrink
         const h = r.h * shrink
-        drawImageCover(ctx, bmp, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2 + lift, w, h, 1)
+        this.drawTilePhoto(ctx, photos[i], bmp, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2 + lift, w, h)
         ctx.restore()
       }
       return
@@ -1010,7 +1073,7 @@ export class FramePainter {
     const rects = computeTileRects(cell.layout, count, width, height, gap)
     rects.forEach((r: Rect, i) => {
       const bmp = bitmaps[i]
-      if (bmp) drawImageCover(ctx, bmp, r.x, r.y, r.w, r.h, 1)
+      if (bmp) this.drawTilePhoto(ctx, photos[i], bmp, r.x, r.y, r.w, r.h)
     })
   }
 
@@ -1064,7 +1127,7 @@ export class FramePainter {
       ctx.fillStyle = '#fbfaf7'
       ctx.fillRect(-frame / 2, -(frame + bottomExtra) / 2, frame, frame + bottomExtra)
       ctx.shadowColor = 'transparent'
-      drawImageCover(ctx, bmp, -frame / 2 + border, -(frame + bottomExtra) / 2 + border, photoBox, photoBox, 1)
+      this.drawTilePhoto(ctx, photos[i], bmp, -frame / 2 + border, -(frame + bottomExtra) / 2 + border, photoBox, photoBox)
       ctx.restore()
     })
   }

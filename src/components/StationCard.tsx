@@ -20,6 +20,7 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   Check,
   Compass,
+  Crop,
   GitMerge,
   Maximize2,
   MessageSquare,
@@ -76,6 +77,12 @@ function PhotoThumbContent({ photo, isCover }: { photo: Photo; isCover: boolean 
           >
             <Compass className="h-2.5 w-2.5" />
             推定
+          </span>
+        )}
+        {photo.crop && (
+          <span title="已自訂取景" className="flex items-center gap-0.5 rounded bg-sky-500/95 px-1 py-0.5 text-[10px] font-bold text-slate-950">
+            <Crop className="h-2.5 w-2.5" />
+            取景
           </span>
         )}
         {isCover && (

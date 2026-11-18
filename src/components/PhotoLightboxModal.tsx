@@ -6,6 +6,7 @@ import { usePhotoObjectUrl } from '../hooks/use-photo-object-url'
 import { getStationDisplayName } from '../services/frame-painter'
 import { useJourneyStore } from '../store/journey-store'
 import type { LocationSource, Station } from '../types/journey'
+import { PhotoCropFrame } from './PhotoCropFrame'
 
 const LOCATION_LABELS: Record<LocationSource, string> = {
   exif: 'GPS 原始定位',
@@ -23,8 +24,9 @@ interface PhotoLightboxModalProps {
 }
 
 /**
- * 单张照片放大检视对话框
- * 支持左右键切换同站点照片、实时勾选入选、设为封面与编辑专属备注
+ * 單張照片放大檢視對話框
+ * 支援左右鍵切換同站點照片、即時勾選入選、設為封面、編輯專屬備註，
+ * 以及在影片比例的取景框內縮放／平移照片（自訂取景，滑鼠與觸控皆可）
  */
 export function PhotoLightboxModal({
   station,
@@ -38,6 +40,8 @@ export function PhotoLightboxModal({
   const togglePhotoIncluded = useJourneyStore((s) => s.togglePhotoIncluded)
   const setCoverPhoto = useJourneyStore((s) => s.setCoverPhoto)
   const updatePhotoNote = useJourneyStore((s) => s.updatePhotoNote)
+  const setPhotoCrop = useJourneyStore((s) => s.setPhotoCrop)
+  const orientation = useJourneyStore((s) => s.journey.settings.orientation)
 
   const dialogRef = useModalDialog(true, onClose)
   const photo = photosMap[photoId]
@@ -113,17 +117,14 @@ export function PhotoLightboxModal({
           </button>
         </div>
 
-        {/* 大圖展示區與左右切換鈕 */}
+        {/* 取景框（影片比例）與左右切換鈕 */}
         <div className="relative flex min-h-[240px] flex-1 items-center justify-center overflow-hidden bg-slate-950 p-2 sm:p-4">
-          {url ? (
-            <img
-              src={url}
-              alt={photo.fileName}
-              className="max-h-[58vh] w-auto max-w-full rounded-lg object-contain shadow-2xl"
-            />
-          ) : (
-            <div className="h-48 w-64 rounded-lg bg-slate-800" />
-          )}
+          <PhotoCropFrame
+            photo={photo}
+            url={url ?? null}
+            aspect={orientation === 'landscape' ? 16 / 9 : 9 / 16}
+            onCommit={(crop) => setPhotoCrop(photo.id, crop)}
+          />
 
           {prevId && (
             <button

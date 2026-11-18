@@ -6,7 +6,7 @@ import {
   OPENING_LOCATOR_DURATION_MS,
   OUTRO_DURATION_MS
 } from '../constants/video-config'
-import type { Coordinates, Journey, RouteKind, Segment } from '../types/journey'
+import type { Coordinates, Journey, RouteKind, Segment, Station } from '../types/journey'
 import { unwrapLongitudeNear, unwrapRouteLongitudes } from './camera-path'
 import { buildStationCells } from './pages'
 import { calculateDistanceKm } from './station-clustering'
@@ -103,6 +103,18 @@ export function resolveRouteKind(
 }
 
 /**
+ * 兩站之間實際採用的交通方式：使用者在目的站手動指定時優先（例如 300 公里的高鐵仍是陸路），
+ * 否則依長途門檻自動判斷
+ */
+export function resolveLegRouteKind(
+  from: Pick<Station, 'center'>,
+  to: Pick<Station, 'center' | 'arrivalRouteKind'>,
+  longDistanceThresholdKm: number
+): RouteKind {
+  return to.arrivalRouteKind ?? resolveRouteKind(from.center, to.center, longDistanceThresholdKm)
+}
+
+/**
  * 陸路路線快取鍵：以起訖座標（小數 4 位，約 11 公尺）為鍵，而不是站點 ID。
  * NOTE: 重新分站、合併、加入照片後站點 ID 會改變或被重用，以 ID 為鍵會把舊路線套到不同的站點組合上
  */
@@ -156,11 +168,7 @@ export function buildJourneyTimeline(
 
     if (i > 0) {
       const prevStation = activeStations[i - 1].station
-      const routeKind = resolveRouteKind(
-        prevStation.center,
-        station.center,
-        journey.settings.longDistanceThresholdKm
-      )
+      const routeKind = resolveLegRouteKind(prevStation, station, journey.settings.longDistanceThresholdKm)
       const cacheKey = groundRouteKey(prevStation.center, station.center)
       let route: [number, number][]
 

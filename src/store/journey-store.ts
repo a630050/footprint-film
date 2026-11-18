@@ -7,7 +7,7 @@ import {
   createStationId,
   PLACEHOLDER_STATION_NAME_PATTERN
 } from '../domain/station-clustering'
-import { groundRouteKey, resolveRouteKind } from '../domain/timeline-builder'
+import { groundRouteKey, resolveLegRouteKind } from '../domain/timeline-builder'
 import {
   clearJourneyDraft,
   loadJourneyDraft,
@@ -28,6 +28,8 @@ import type {
   Journey,
   JourneySettings,
   Photo,
+  PhotoCrop,
+  RouteKind,
   Station,
   StationPage
 } from '../types/journey'
@@ -91,6 +93,10 @@ interface JourneyStoreState {
   deleteStation: (stationId: string) => void
   togglePhotoIncluded: (photoId: string) => void
   updatePhotoNote: (photoId: string, note: string) => void
+  /** 指定從上一站到此站的交通方式（undefined = 依長途門檻自動判斷） */
+  setStationArrivalRouteKind: (stationId: string, kind: RouteKind | undefined) => void
+  /** 設定（或清除）照片的自訂取景範圍 */
+  setPhotoCrop: (photoId: string, crop: PhotoCrop | undefined) => void
   /** 從旅程中刪除照片（可在提示列按「復原」） */
   deletePhoto: (photoId: string) => void
   undoDeletePhoto: () => void
@@ -195,6 +201,8 @@ const HISTORY_ACTIONS: Partial<Record<keyof JourneyStoreState, ((...args: never[
   deleteStation: null,
   togglePhotoIncluded: null,
   updatePhotoNote: ((id: string) => `photoNote:${id}`) as (...args: never[]) => string,
+  setPhotoCrop: ((id: string) => `crop:${id}`) as (...args: never[]) => string,
+  setStationArrivalRouteKind: null,
   deletePhoto: null,
   undoDeletePhoto: null,
   updateStationPages: null,
@@ -542,6 +550,26 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => withUndoH
       ...journey.photos,
       [photoId]: { ...target, note }
     }
+    const nextJourney: Journey = { ...journey, photos }
+    set({ journey: nextJourney })
+    void saveJourneyDraft(nextJourney)
+  },
+
+  setStationArrivalRouteKind: (stationId, kind) => {
+    const { journey } = get()
+    const stations = journey.stations.map((st) => (st.id === stationId ? { ...st, arrivalRouteKind: kind } : st))
+    const nextJourney: Journey = { ...journey, stations }
+    set({ journey: nextJourney })
+    void saveJourneyDraft(nextJourney)
+    // 改成陸路時需要查詢道路路線
+    void get().refreshStationNamesAndRoutes()
+  },
+
+  setPhotoCrop: (photoId, crop) => {
+    const { journey } = get()
+    const target = journey.photos[photoId]
+    if (!target) return
+    const photos = { ...journey.photos, [photoId]: { ...target, crop } }
     const nextJourney: Journey = { ...journey, photos }
     set({ journey: nextJourney })
     void saveJourneyDraft(nextJourney)
@@ -985,11 +1013,7 @@ export const useJourneyStore = create<JourneyStoreState>((set, get) => withUndoH
     for (let i = 1; i < activeStations.length; i++) {
       const prev = activeStations[i - 1]
       const curr = activeStations[i]
-      const kind = resolveRouteKind(
-        prev.center,
-        curr.center,
-        currentJourney.settings.longDistanceThresholdKm
-      )
+      const kind = resolveLegRouteKind(prev, curr, currentJourney.settings.longDistanceThresholdKm)
       const key = groundRouteKey(prev.center, curr.center)
       if (kind === 'ground' && !get().groundRoutes[key]) {
         const { route, isFallback } = await fetchGroundRouteWithFallback(prev.center, curr.center)

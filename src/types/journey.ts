@@ -25,6 +25,18 @@ export interface Photo {
   locationSource: LocationSource // inferred = 推定位置
   included: boolean              // 入選照片
   note?: string                  // 照片備註
+  crop?: PhotoCrop               // 使用者在放大檢視中縮放／平移決定的取景範圍；未設定時自動取景
+}
+
+/**
+ * 照片取景範圍：以照片寬高為 1 的比例座標（左上角 x、y 與寬高 w、h）。
+ * 可以超出 0～1（縮小到比照片還小時），超出部分在影片中以模糊背景補滿。
+ */
+export interface PhotoCrop {
+  x: number
+  y: number
+  w: number
+  h: number
 }
 
 /** 站點 */
@@ -38,6 +50,7 @@ export interface Station {
   countryName?: string           // 地名服務回傳的國家名稱（用於自動產生旅程標題）
   cityName?: string              // 地名服務回傳的城市名稱（用於自動產生旅程標題）
   pages?: StationPage[]          // 使用者手動分頁後才有；未設定時依連拍門檻與自動拼圖規則產生
+  arrivalRouteKind?: RouteKind   // 從上一站到這一站的交通方式；未設定時依長途門檻自動判斷（例如長途高鐵可手動指定為陸路）
 }
 
 /** 影片方向 */

@@ -17,7 +17,7 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibreMap, type StyleSpec
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { computeFitBoundsCamera } from '../domain/camera-path'
 import { calculateDistanceKm } from '../domain/station-clustering'
-import { resolveRouteKind } from '../domain/timeline-builder'
+import { resolveLegRouteKind } from '../domain/timeline-builder'
 import { useJourneySummary } from '../hooks/use-journey-summary'
 import { usePhotoObjectUrl } from '../hooks/use-photo-object-url'
 import { getStationDisplayName } from '../services/frame-painter'
@@ -88,6 +88,7 @@ export function JourneyEditor() {
   const setCurrentStep = useJourneyStore((s) => s.setCurrentStep)
   const movePhotoToStation = useJourneyStore((s) => s.movePhotoToStation)
   const mergeWithNextStation = useJourneyStore((s) => s.mergeWithNextStation)
+  const setStationArrivalRouteKind = useJourneyStore((s) => s.setStationArrivalRouteKind)
   const createManualStationWithPhotos = useJourneyStore(
     (s) => s.createManualStationWithPhotos
   )
@@ -647,7 +648,7 @@ export function JourneyEditor() {
               const nextSt = idx < journey.stations.length - 1 ? journey.stations[idx + 1] : undefined
               const distKm = nextSt ? calculateDistanceKm(st.center, nextSt.center) : 0
               const routeKind = nextSt
-                ? resolveRouteKind(st.center, nextSt.center, journey.settings.longDistanceThresholdKm)
+                ? resolveLegRouteKind(st, nextSt, journey.settings.longDistanceThresholdKm)
                 : 'ground'
 
               return (
@@ -668,7 +669,8 @@ export function JourneyEditor() {
                     <div className="relative flex items-center justify-center py-1">
                       <div className="absolute inset-x-6 top-1/2 -z-0 border-t border-dashed border-slate-800" aria-hidden="true" />
                       <div className="relative z-10 flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-800 bg-slate-950 px-3 py-1 text-xs shadow">
-                        <span
+                        {/* 交通方式：自動依長途門檻判斷，也可手動指定（例如長途高鐵仍是陸路） */}
+                        <label
                           className={`inline-flex items-center gap-1 font-medium ${
                             routeKind === 'flight' ? 'text-amber-300' : 'text-sky-300'
                           }`}
@@ -678,10 +680,32 @@ export function JourneyEditor() {
                           ) : (
                             <Car className="h-3.5 w-3.5" />
                           )}
-                          <span>
-                            {routeKind === 'flight' ? '飛行' : '陸路'} {Math.round(distKm).toLocaleString()} km
+                          <span className="relative inline-flex items-center">
+                          <select
+                            aria-label={`從「${getStationDisplayName(st)}」到「${getStationDisplayName(nextSt)}」的交通方式`}
+                            value={nextSt.arrivalRouteKind ?? 'auto'}
+                            onChange={(e) =>
+                              setStationArrivalRouteKind(
+                                nextSt.id,
+                                e.target.value === 'auto' ? undefined : (e.target.value as 'ground' | 'flight')
+                              )
+                            }
+                            className="cursor-pointer appearance-none rounded-md bg-transparent pr-3 font-medium focus:outline-none focus:ring-1 focus:ring-amber-400"
+                          >
+                            <option value="auto">
+                              自動（
+                              {resolveLegRouteKind(st, { center: nextSt.center }, journey.settings.longDistanceThresholdKm) === 'flight'
+                                ? '飛行'
+                                : '陸路'}
+                              ）
+                            </option>
+                            <option value="ground">陸路（開車、高鐵、火車）</option>
+                            <option value="flight">飛行</option>
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-0 h-3 w-3 opacity-70" />
                           </span>
-                        </span>
+                          <span>{Math.round(distKm).toLocaleString()} km</span>
+                        </label>
                         <span className="text-slate-700" aria-hidden="true">|</span>
                         <button
                           type="button"

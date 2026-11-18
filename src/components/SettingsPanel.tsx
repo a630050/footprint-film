@@ -241,7 +241,7 @@ export function SettingsPanel() {
                 className="w-full accent-amber-500"
               />
               <p className="text-[11px] text-slate-400">
-                超過此距離畫飛行大圓弧線，未超過畫陸路路線（預設 100km）
+                超過此距離自動畫成飛行弧線（預設 100km）；長途高鐵、火車可在站點之間的交通方式改為陸路
               </p>
             </div>
 
